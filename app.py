@@ -6,10 +6,11 @@ import hashlib
 import random
 import json
 import os
+import re
 from datetime import datetime
 
 # ==========================================
-# 1. PAGE CONFIG & VIBRANT CARTOON THEME
+# 1. PAGE CONFIG & HIGH-CONTRAST SYMMETRICAL THEME
 # ==========================================
 st.set_page_config(
     page_title="WonderKids Academy 🌈",
@@ -20,134 +21,223 @@ st.set_page_config(
 
 CUSTOM_CSS = """
 <style>
-@import url('https://fonts.googleapis.com/css2?family=Fredoka:wght@500;600;700&family=Bubblegum+Sans&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Fredoka:wght@500;600;700&display=swap');
 
 html, body, [class*="css"] {
     font-family: 'Fredoka', sans-serif !important;
+    color: #102A43 !important;
 }
 
-/* Sunny Rainbow Sky Background */
+/* Soft, Calm Sky-Mint Background for High Foreground Contrast */
 .stApp {
-    background: linear-gradient(160deg, #FFE082 0%, #B3E5FC 35%, #F8BBD0 70%, #C8E6C9 100%);
+    background: linear-gradient(160deg, #E0F2FE 0%, #FEF9C3 50%, #DCFCE7 100%);
     background-attachment: fixed;
 }
 
-/* Sidebar Playground Styling */
+/* High-Contrast Sidebar */
 section[data-testid="stSidebar"] {
-    background: linear-gradient(180deg, #FFF9C4 0%, #E1F5FE 100%) !important;
-    border-right: 5px dashed #FF8A65 !important;
+    background-color: #FFFFFF !important;
+    border-right: 4px solid #38BDF8 !important;
 }
 
-/* Bouncy 3D Candy Buttons */
+section[data-testid="stSidebar"] * {
+    color: #102A43 !important;
+}
+
+/* Form Inputs & Labels High Contrast */
+label, .stMarkdown p, .stMarkdown h1, .stMarkdown h2, .stMarkdown h3 {
+    color: #102A43 !important;
+}
+
+div[data-baseweb="input"] > div, div[data-baseweb="select"] > div {
+    background-color: #F8FAFC !important;
+    border: 2px solid #0284C7 !important;
+    border-radius: 14px !important;
+    color: #0F172A !important;
+}
+
+input {
+    color: #0F172A !important;
+    font-weight: 600 !important;
+}
+
+/* Symmetrical, High-Contrast 3D Candy Buttons */
 div.stButton > button {
-    border-radius: 28px !important;
-    font-size: 1.45rem !important;
+    border-radius: 22px !important;
+    font-size: 1.35rem !important;
     font-weight: 700 !important;
-    padding: 0.95rem 1.4rem !important;
-    border: 4px solid #FF7043 !important;
-    background: linear-gradient(180deg, #FFFFFF 0%, #FFF59D 100%) !important;
-    color: #1A237E !important;
-    box-shadow: 0 7px 0 #E64A19, 0 10px 18px rgba(0,0,0,0.12) !important;
-    transition: all 0.14s cubic-bezier(0.34, 1.56, 0.64, 1) !important;
-    width: 100%;
+    min-height: 68px !important;
+    padding: 0.85rem 1.2rem !important;
+    border: 3px solid #0284C7 !important;
+    background: #FFFFFF !important;
+    color: #0F172A !important;
+    box-shadow: 0 6px 0 #0284C7, 0 8px 16px rgba(15, 23, 42, 0.10) !important;
+    transition: transform 0.12s ease, box-shadow 0.12s ease, background-color 0.12s ease !important;
+    width: 100% !important;
 }
 
 div.stButton > button:hover {
-    transform: translateY(-4px) scale(1.03) rotate(-0.5deg) !important;
-    border-color: #AB47BC !important;
-    box-shadow: 0 10px 0 #7B1FA2, 0 14px 22px rgba(0,0,0,0.16) !important;
-    background: linear-gradient(180deg, #FFFDE7 0%, #F48FB1 100%) !important;
-    color: #FFFFFF !important;
+    transform: translateY(-3px) !important;
+    border-color: #D97706 !important;
+    background: #FEF08A !important;
+    color: #0F172A !important;
+    box-shadow: 0 9px 0 #D97706, 0 12px 20px rgba(15, 23, 42, 0.15) !important;
 }
 
 div.stButton > button:active {
-    transform: translateY(4px) scale(0.98) !important;
-    box-shadow: 0 2px 0 #E64A19 !important;
+    transform: translateY(3px) !important;
+    box-shadow: 0 2px 0 #0284C7 !important;
+}
+
+div.stButton > button:disabled {
+    background: #E2E8F0 !important;
+    border-color: #94A3B8 !important;
+    color: #475569 !important;
+    box-shadow: none !important;
+}
+
+/* Form Submit Buttons */
+div[data-testid="stFormSubmitButton"] > button {
+    border-radius: 20px !important;
+    font-size: 1.25rem !important;
+    font-weight: 700 !important;
+    min-height: 58px !important;
+    border: 3px solid #15803D !important;
+    background: #22C55E !important;
+    color: #FFFFFF !important;
+    box-shadow: 0 6px 0 #15803D !important;
+    width: 100% !important;
+}
+
+div[data-testid="stFormSubmitButton"] > button:hover {
+    background: #16A34A !important;
+    color: #FFFFFF !important;
 }
 
 /* Rainbow Banner Header */
 .rainbow-banner {
-    background: linear-gradient(90deg, #FF5252, #FF9800, #FFEB3B, #4CAF50, #2196F3, #9C27B0);
-    padding: 6px;
-    border-radius: 36px;
-    box-shadow: 0 12px 28px rgba(0,0,0,0.14);
-    margin-bottom: 18px;
+    background: linear-gradient(90deg, #EF4444, #F59E0B, #10B981, #0EA5E9, #8B5CF6);
+    padding: 5px;
+    border-radius: 30px;
+    box-shadow: 0 10px 24px rgba(15, 23, 42, 0.12);
+    margin-bottom: 22px;
 }
 
 .banner-inner {
     background: #FFFFFF;
-    border-radius: 31px;
-    padding: 22px 26px;
+    border-radius: 26px;
+    padding: 24px 28px;
     text-align: center;
 }
 
-/* Main Cartoon Stage Card */
+/* Symmetrical Auth Panel Card */
+.auth-card {
+    background: #FFFFFF;
+    border-radius: 26px;
+    padding: 22px 24px;
+    border: 4px solid #38BDF8;
+    box-shadow: 0 8px 0 #0284C7;
+    margin-bottom: 12px;
+}
+
+/* Top 4-Card Symmetrical HUD */
+.hud-card {
+    background: #FFFFFF;
+    border: 3px solid #38BDF8;
+    border-radius: 20px;
+    padding: 14px 12px;
+    text-align: center;
+    box-shadow: 0 5px 0 #0284C7;
+    height: 100%;
+}
+
+.hud-label {
+    font-size: 0.85rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: #0369A1 !important;
+}
+
+.hud-value {
+    font-size: 1.25rem;
+    font-weight: 700;
+    color: #0F172A !important;
+    margin-top: 4px;
+}
+
+/* Main Centered Question Stage */
 .stage-card {
     background: #FFFFFF;
-    border-radius: 36px;
-    padding: 26px;
-    border: 6px solid #29B6F6;
-    box-shadow: 0 10px 0 #0288D1, 0 16px 30px rgba(0,0,0,0.12);
+    border-radius: 32px;
+    padding: 28px 32px;
+    border: 5px solid #0284C7;
+    box-shadow: 0 10px 0 #0369A1, 0 16px 32px rgba(15, 23, 42, 0.12);
     text-align: center;
-    margin-bottom: 20px;
-    position: relative;
+    margin: 18px 0 22px 0;
 }
 
-/* Floating Bounce Animation */
-@keyframes floatBounce {
-    0%, 100% { transform: translateY(0px) scale(1); }
-    50% { transform: translateY(-8px) scale(1.04); }
+@keyframes gentleBob {
+    0%, 100% { transform: translateY(0px); }
+    50% { transform: translateY(-6px); }
 }
 
-.mascot-bubble {
+.mascot-pill {
     display: inline-flex;
     align-items: center;
-    gap: 14px;
-    background: linear-gradient(135deg, #FFF3E0 0%, #FFE0B2 100%);
-    border: 4px solid #FFA726;
+    gap: 12px;
+    background: #FEF3C7;
+    border: 3px solid #D97706;
     border-radius: 999px;
-    padding: 10px 24px;
-    margin-bottom: 14px;
-    box-shadow: 0 5px 0 #FB8C00;
+    padding: 8px 22px;
+    margin-bottom: 16px;
 }
 
-.mascot-icon {
-    font-size: 2.8rem;
-    animation: floatBounce 2.2s ease-in-out infinite;
+.mascot-avatar {
+    font-size: 2.3rem;
+    animation: gentleBob 2.2s ease-in-out infinite;
 }
 
 .visual-stage {
-    font-size: 4.3rem;
+    font-size: 4rem;
     letter-spacing: 12px;
-    margin: 16px 0;
-    padding: 22px;
-    background: linear-gradient(135deg, #E8F5E9 0%, #E0F7FA 100%);
-    border-radius: 28px;
-    border: 4px dashed #26A69A;
-    animation: floatBounce 3s ease-in-out infinite;
+    margin: 14px auto;
+    padding: 22px 18px;
+    background: #F0F9FF;
+    border-radius: 24px;
+    border: 3px dashed #0284C7;
+    color: #0F172A !important;
+}
+
+.question-title {
+    color: #0F172A !important;
+    font-size: 1.85rem !important;
+    font-weight: 700 !important;
+    line-height: 1.35 !important;
+    margin: 14px 0 4px 0 !important;
 }
 
 .fact-box {
-    background: linear-gradient(135deg, #FFFDE7 0%, #E8F5E9 100%);
-    border: 4px solid #66BB6A;
-    border-left: 12px solid #43A047;
-    border-radius: 24px;
+    background: #ECFDF5;
+    border: 3px solid #059669;
+    border-left: 12px solid #047857;
+    border-radius: 22px;
     padding: 20px 24px;
-    font-size: 1.25rem;
-    color: #1B5E20;
+    font-size: 1.2rem;
+    color: #064E3B !important;
     margin-top: 16px;
-    box-shadow: 0 7px 0 #2E7D32;
+    box-shadow: 0 6px 0 #047857;
 }
 
 .badge-pill {
     display: inline-block;
-    padding: 7px 18px;
+    padding: 6px 16px;
     border-radius: 999px;
     font-weight: 700;
-    font-size: 1.05rem;
-    background: #FFF176;
-    border: 2px solid #FBC02D;
-    color: #E65100;
+    font-size: 1rem;
+    background: #FEF08A;
+    border: 2px solid #CA8A04;
+    color: #713F12 !important;
     margin: 4px;
 }
 </style>
@@ -165,28 +255,32 @@ def get_db_connection():
         db_url = os.environ.get("DATABASE_URL")
 
     if db_url:
-        # Auto-clean accidental `psql '...'` copy-paste from Neon dashboard
         clean_url = str(db_url).strip()
         if clean_url.startswith("psql "):
             clean_url = clean_url[5:].strip()
         clean_url = clean_url.strip("'\"")
 
-        # Strip channel_binding parameter if present to prevent libpq compatibility issues
         if "channel_binding=" in clean_url:
             parts = clean_url.split("?")
             if len(parts) == 2:
                 params = [p for p in parts[1].split("&") if not p.startswith("channel_binding=")]
                 clean_url = parts[0] + ("?" + "&".join(params) if params else "")
 
-        # Enforce SSL required for Neon Cloud PostgreSQL
         if "sslmode=" not in clean_url:
             sep = "&" if "?" in clean_url else "?"
             clean_url += f"{sep}sslmode=require"
 
+        # Auto-inject endpoint ID option if an ep-* host is present (prevents SNI errors)
+        ep_match = re.search(r"@(ep-[a-z0-9-]+)", clean_url)
+        if ep_match and "options=" not in clean_url:
+            ep_id = ep_match.group(1).replace("-pooler", "")
+            sep = "&" if "?" in clean_url else "?"
+            clean_url += f"{sep}options=endpoint%3D{ep_id}"
+
         try:
             return psycopg2.connect(clean_url, connect_timeout=10), "postgres"
         except Exception as e:
-            st.warning(f"⚠️ Cloud DB Error ({type(e).__name__}): {e} — Using temporary local storage.")
+            st.warning(f"⚠️ Cloud DB Error ({type(e).__name__}): {e} — Using local storage.")
 
     return sqlite3.connect("wonderkids.db"), "sqlite"
 
@@ -302,7 +396,7 @@ def get_user_by_id(user_id):
         }
     return None
 
-STICKER_POOL = ["🦄", "🦖", "🚀", "🌈", "🐬", "🐼", "🦋", "🍓", "🎨", "🏆", "🐢", "🦊", "🐘", "🪐", "🐙", "🦁", "🍦", "🚂", "🦕", "🐳"]
+STICKER_POOL = ["🦄", "🦖", "🚀", "🌈", "🐬", "🐼", "🦋", "🍓", "🎨", "🏆", "🐢", "🦊", "🐘", "🪐", "🐙", "🦁", "🍦", "🚂", "🦕"]
 
 def record_attempt(user_id, subject, mode, level, is_correct):
     conn, db_type = get_db_connection()
@@ -415,9 +509,9 @@ def render_interactive_toys(items: list, label_hint: str = "Tap each picture to 
     items_json = json.dumps(items)
     html_widget = f"""
     <div style="text-align:center; font-family:'Fredoka',sans-serif; padding:6px;">
-      <div style="font-size:1rem; font-weight:700; color:#00695C; margin-bottom:8px;">👆 {label_hint}</div>
+      <div style="font-size:1.05rem; font-weight:700; color:#0F172A; margin-bottom:10px;">👆 {label_hint}</div>
       <div id="toy-box" style="display:flex; flex-wrap:wrap; justify-content:center; gap:12px;"></div>
-      <div id="tap-readout" style="margin-top:8px; font-size:1.3rem; font-weight:700; color:#E65100; min-height:28px;"></div>
+      <div id="tap-readout" style="margin-top:8px; font-size:1.35rem; font-weight:700; color:#B45309; min-height:28px;"></div>
     </div>
     <script>
       const toys = {items_json};
@@ -425,22 +519,23 @@ def render_interactive_toys(items: list, label_hint: str = "Tap each picture to 
       const readout = document.getElementById('tap-readout');
       let count = 0;
 
-      toys.forEach((item, idx) => {{
+      toys.forEach((item) => {{
         const btn = document.createElement('button');
         btn.innerText = item;
         btn.style.cssText = `
-          font-size: 3.2rem; background: #FFFDE7; border: 4px solid #FFB300;
-          border-radius: 22px; padding: 10px 18px; cursor: pointer;
-          box-shadow: 0 5px 0 #FB8C00; transition: transform 0.15s;
+          font-size: 3rem; background: #FFFFFF; border: 4px solid #0284C7;
+          border-radius: 20px; padding: 10px 18px; cursor: pointer;
+          box-shadow: 0 5px 0 #0369A1; transition: transform 0.15s;
         `;
         btn.onclick = () => {{
           if (!btn.dataset.tapped) {{
             btn.dataset.tapped = "1";
             count++;
-            btn.style.background = "#C8E6C9";
-            btn.style.borderColor = "#43A047";
-            btn.style.transform = "scale(1.15) rotate(6deg)";
-            readout.innerText = "⭐ " + count + "!";
+            btn.style.background = "#BBF7D0";
+            btn.style.borderColor = "#15803D";
+            btn.style.boxShadow = "0 5px 0 #15803D";
+            btn.style.transform = "scale(1.12)";
+            readout.innerText = "⭐ Counted: " + count + "!";
             if ('speechSynthesis' in window) {{
               window.speechSynthesis.cancel();
               const u = new SpeechSynthesisUtterance(String(count));
@@ -453,10 +548,10 @@ def render_interactive_toys(items: list, label_hint: str = "Tap each picture to 
       }});
     </script>
     """
-    components.html(html_widget, height=165)
+    components.html(html_widget, height=170)
 
 # ==========================================
-# 5. EXPANDED EXERCISE BANK (AGES 3 TO 6)
+# 5. EXPANDED EXERCISE BANK (ALWAYS 4 SYMMETRICAL OPTIONS)
 # ==========================================
 LEVEL_NAMES = {
     1: "🌱 Level 1: Tiny Sprout (Age 3)",
@@ -491,7 +586,7 @@ def generate_question(subject: str, level: int, mode: str):
         if level == 1:
             n = random.randint(1, 5)
             emoji = random.choice(["🍎", "🦆", "⭐", "🍓", "🐢", "🧁"])
-            opts = random.sample([str(i) for i in range(1, 6)], 3)
+            opts = random.sample([str(i) for i in range(1, 6)], 4)
             if str(n) not in opts:
                 opts[0] = str(n)
             random.shuffle(opts)
@@ -509,7 +604,8 @@ def generate_question(subject: str, level: int, mode: str):
             if random.choice([True, False]):
                 n = random.randint(6, 10)
                 emoji = random.choice(["🐠", "🦋", "🎈", "🍪", "🚗"])
-                opts = list({str(n), str(n - 1), str(min(10, n + 1)), str(n - 2)})[:4]
+                pool = {str(n), str(n - 1), str(min(10, n + 1)), str(n - 2), str(max(1, n - 3))}
+                opts = list(pool)[:4]
                 random.shuffle(opts)
                 return {
                     "visual": " ".join([emoji] * n),
@@ -522,11 +618,14 @@ def generate_question(subject: str, level: int, mode: str):
                 }
             else:
                 a, b = random.sample(range(2, 9), 2)
+                ans = f"Basket A ({a})" if a > b else f"Basket B ({b})"
+                opts = [f"Basket A ({a})", f"Basket B ({b})", "Both Equal!", "Zero Fruit"]
+                random.shuffle(opts)
                 return {
                     "visual": f"Basket A: {'🍓'*a}   🆚   Basket B: {'🍊'*b}",
                     "question": "Which basket has MORE yummy fruit?",
-                    "answer": f"Basket A ({a})" if a > b else f"Basket B ({b})",
-                    "options": [f"Basket A ({a})", f"Basket B ({b})", "Both Equal!"],
+                    "answer": ans,
+                    "options": opts,
                     "fact": "Comparing groups helps us tell which pile is bigger or smaller!",
                     "voice": "Yum! Look at the two fruit baskets! Which basket has more fruit?",
                     "toys": []
@@ -535,7 +634,8 @@ def generate_question(subject: str, level: int, mode: str):
         elif level == 3:
             a, b = random.randint(1, 5), random.randint(1, 5)
             ans = a + b
-            opts = list({str(ans), str(ans + 1), str(max(1, ans - 1)), str(ans + 2)})[:4]
+            pool = {str(ans), str(ans + 1), str(max(1, ans - 1)), str(ans + 2), str(max(0, ans - 2))}
+            opts = list(pool)[:4]
             random.shuffle(opts)
             return {
                 "visual": f"{'🦖'*a}  ➕  {'🦖'*b}",
@@ -553,7 +653,8 @@ def generate_question(subject: str, level: int, mode: str):
                 a = random.randint(6, 12)
                 b = random.randint(2, 5)
                 ans = a - b
-                opts = list({str(ans), str(ans + 1), str(max(0, ans - 1)), str(a)})[:4]
+                pool = {str(ans), str(ans + 1), str(max(0, ans - 1)), str(a), str(ans + 2)}
+                opts = list(pool)[:4]
                 random.shuffle(opts)
                 return {
                     "visual": f"{'🎈'*a}  ➖  ({b} popped!)",
@@ -585,7 +686,8 @@ def generate_question(subject: str, level: int, mode: str):
                 total = random.randint(7, 10)
                 part = random.randint(2, 5)
                 missing = total - part
-                opts = list({str(missing), str(missing + 1), str(max(1, missing - 1)), str(total)})[:4]
+                pool = {str(missing), str(missing + 1), str(max(1, missing - 1)), str(total), str(missing + 2)}
+                opts = list(pool)[:4]
                 random.shuffle(opts)
                 return {
                     "visual": f"{part}  ➕  ❓  =  {total}",
@@ -751,16 +853,16 @@ if "speech_payload" not in st.session_state:
     st.session_state.speech_payload = None
 
 # ==========================================
-# 7. IN-APP LOGIN & SIGN-UP GATEWAY
+# 7. SYMMETRICAL LOGIN & SIGN-UP GATEWAY
 # ==========================================
 if st.session_state.user_id is None:
     st.markdown("""
     <div class="rainbow-banner">
       <div class="banner-inner">
-        <div style="font-size:3.4rem; margin-bottom:4px;">🦁 🦄 🦖 🚀 🌈</div>
-        <h1 style="font-size:3.1rem; color:#FF6F00; margin:0;">WonderKids Academy</h1>
-        <p style="font-size:1.35rem; color:#37474F; margin:8px 0 14px 0;">
-            Playful Cartoon Learning World for Little Explorers (Ages 3 – 6)
+        <div style="font-size:3.2rem; margin-bottom:6px;">🦁 🦄 🦖 🚀 🌈</div>
+        <h1 style="font-size:3rem; color:#0F172A; margin:0;">WonderKids Academy</h1>
+        <p style="font-size:1.3rem; color:#334155; margin:8px 0 14px 0;">
+            High-Contrast Cartoon Learning World for Little Explorers (Ages 3 – 6)
         </p>
         <span class="badge-pill">🔢 Math Kingdom</span>
         <span class="badge-pill">🔤 Alphabet Jungle</span>
@@ -773,10 +875,15 @@ if st.session_state.user_id is None:
     col_left, col_right = st.columns(2, gap="large")
 
     with col_left:
-        st.markdown("### 🔑 Welcome Back! Log In")
+        st.markdown("""
+        <div class="auth-card">
+            <h3 style="margin:0; text-align:center; color:#0369A1;">🔑 Returning Explorer Log In</h3>
+        </div>
+        """, unsafe_allow_html=True)
         with st.form("login_form"):
             login_user = st.text_input("Explorer Username", placeholder="e.g., leo_dino")
             login_pw = st.text_input("Secret Passcode", type="password", placeholder="••••••")
+            st.write("")
             submitted_login = st.form_submit_button("🚀 Jump Into the Playground!")
             if submitted_login:
                 user = authenticate_user(login_user, login_pw)
@@ -794,13 +901,20 @@ if st.session_state.user_id is None:
                     st.error("Oopsie! Check your username or secret passcode and try again.")
 
     with col_right:
-        st.markdown("### ✨ New Kid Explorer? Create Profile!")
+        st.markdown("""
+        <div class="auth-card">
+            <h3 style="margin:0; text-align:center; color:#15803D;">✨ New Explorer Sign Up</h3>
+        </div>
+        """, unsafe_allow_html=True)
         with st.form("signup_form"):
             new_child = st.text_input("Child's First Name", placeholder="e.g., Maya")
             new_user = st.text_input("Choose a Fun Username", placeholder="e.g., maya_star")
             new_pw = st.text_input("Create a Secret Passcode", type="password", placeholder="e.g., 1234")
-            age = st.selectbox("Child's Age", [3, 4, 5, 6], format_func=lambda a: f"🎂 {a} Years Old")
-            avatar = st.selectbox("Pick a Cartoon Buddy", ["🦁 Leo the Lion", "🦄 Sparkle Unicorn", "🦖 Rexy Dino", "🐼 Bamboo Panda", "🚀 Astro Fox"])
+            r_c1, r_c2 = st.columns(2)
+            with r_c1:
+                age = st.selectbox("Child's Age", [3, 4, 5, 6], format_func=lambda a: f"🎂 {a} Years Old")
+            with r_c2:
+                avatar = st.selectbox("Cartoon Buddy", ["🦁 Leo", "🦄 Sparkle", "🦖 Rexy", "🐼 Bamboo", "🚀 Astro"])
             submitted_signup = st.form_submit_button("🎉 Create My Profile & Play!")
             if submitted_signup:
                 if not new_child or not new_user or not new_pw:
@@ -829,10 +943,10 @@ user = get_user_by_id(st.session_state.user_id)
 
 with st.sidebar:
     st.markdown(f"""
-    <div style="background:linear-gradient(135deg,#FFFDE7,#FFE082); padding:16px; border-radius:26px; border:4px solid #FFA000; text-align:center; box-shadow:0 6px 0 #F57C00;">
-        <div style="font-size:3.5rem;">{user['avatar']}</div>
-        <h3 style="margin:4px 0; color:#E65100;">{user['child_name']} • Age {user['age_group']}</h3>
-        <div style="font-size:1.25rem; font-weight:700; color:#1A237E;">⭐ {user['stars']} Stars  |  🔥 {user['streak']} Streak</div>
+    <div style="background:#FEF9C3; padding:16px; border-radius:22px; border:3px solid #D97706; text-align:center; box-shadow:0 5px 0 #B45309; margin-bottom:14px;">
+        <div style="font-size:3.2rem;">{user['avatar']}</div>
+        <h3 style="margin:4px 0; color:#0F172A;">{user['child_name']} • Age {user['age_group']}</h3>
+        <div style="font-size:1.15rem; font-weight:700; color:#0369A1;">⭐ {user['stars']} Stars  |  🔥 {user['streak']} Streak</div>
     </div>
     """, unsafe_allow_html=True)
 
@@ -889,7 +1003,7 @@ if st.session_state.speech_payload:
     st.session_state.speech_payload = None
 
 # ==========================================
-# 9. VIEW 1: PLAY LEARNING GAMES
+# 9. VIEW 1: SYMMETRICAL GAME ARENA
 # ==========================================
 if nav_choice == "🎮 Play Learning Games":
     if st.session_state.current_q is None:
@@ -897,33 +1011,58 @@ if nav_choice == "🎮 Play Learning Games":
 
     q_data = st.session_state.current_q
 
-    top_c1, top_c2 = st.columns([3, 1])
-    with top_c1:
-        st.markdown(f"## {st.session_state.subject} • {st.session_state.mode}")
-        st.caption(f"{LEVEL_NAMES[st.session_state.level]} — {MODES[st.session_state.mode]}")
-    with top_c2:
-        if st.button("🔊 Hear Question!"):
+    # Symmetrical 4-Column Top HUD Bar
+    h1, h2, h3, h4 = st.columns(4, gap="medium")
+    with h1:
+        st.markdown(f"""
+        <div class="hud-card">
+            <div class="hud-label">🌍 Learning World</div>
+            <div class="hud-value">{st.session_state.subject}</div>
+        </div>
+        """, unsafe_allow_html=True)
+    with h2:
+        st.markdown(f"""
+        <div class="hud-card">
+            <div class="hud-label">🎯 Game Mode</div>
+            <div class="hud-value">{st.session_state.mode}</div>
+        </div>
+        """, unsafe_allow_html=True)
+    with h3:
+        st.markdown(f"""
+        <div class="hud-card">
+            <div class="hud-label">⭐ Score & Streak</div>
+            <div class="hud-value">⭐ {user['stars']}  •  🔥 {user['streak']}</div>
+        </div>
+        """, unsafe_allow_html=True)
+    with h4:
+        if st.button("🔊 Hear Question"):
             speak_child_voice(q_data["voice"], "pop", str(random.random()))
 
+    # Centered Question Stage Card
     st.markdown(f"""
     <div class="stage-card">
-        <div class="mascot-bubble">
-            <span class="mascot-icon">{user['avatar']}</span>
-            <span style="font-size:1.15rem; font-weight:700; color:#E65100;">
-                "{user['child_name']}, you've got this! Tap your answer below!"
+        <div class="mascot-pill">
+            <span class="mascot-avatar">{user['avatar']}</span>
+            <span style="font-size:1.15rem; font-weight:700; color:#78350F;">
+                "{user['child_name']}, pick the right answer card below!"
             </span>
         </div>
         <div class="visual-stage">{q_data['visual']}</div>
-        <h2 style="color:#1A237E; font-size:1.95rem; margin-bottom:4px;">{q_data['question']}</h2>
+        <div class="question-title">{q_data['question']}</div>
     </div>
     """, unsafe_allow_html=True)
 
     if q_data.get("toys"):
         render_interactive_toys(q_data["toys"])
 
-    cols = st.columns(len(q_data["options"]))
-    for idx, opt in enumerate(q_data["options"]):
-        with cols[idx]:
+    # Strict 2x2 Symmetrical Answer Grid (Equal Width & Height)
+    options = q_data["options"]
+    row1 = st.columns(2, gap="large")
+    row2 = st.columns(2, gap="large")
+    grid_slots = [row1[0], row1[1], row2[0], row2[1]]
+
+    for idx, opt in enumerate(options[:4]):
+        with grid_slots[idx]:
             if st.button(opt, key=f"opt_{idx}", disabled=st.session_state.answered):
                 is_right = (opt == q_data["answer"])
                 st.session_state.answered = True
@@ -952,6 +1091,7 @@ if nav_choice == "🎮 Play Learning Games":
                 st.rerun()
 
     if st.session_state.answered:
+        st.write("")
         if st.session_state.last_result:
             st.balloons()
             st.success(f"🎉 WOOHOO, {user['child_name'].upper()}! You won a shiny ⭐ Star!")
@@ -967,40 +1107,42 @@ if nav_choice == "🎮 Play Learning Games":
         """, unsafe_allow_html=True)
 
         st.write("")
-        if st.button("➡️ Next Fun Challenge!"):
-            st.session_state.current_q = generate_question(st.session_state.subject, st.session_state.level, st.session_state.mode)
-            st.session_state.answered = False
-            st.session_state.last_result = None
-            st.session_state.new_sticker = None
-            st.session_state.speech_payload = (st.session_state.current_q["voice"], "pop", str(random.random()))
-            st.rerun()
+        _, center_btn, _ = st.columns([1, 2, 1])
+        with center_btn:
+            if st.button("➡️ Next Fun Challenge!"):
+                st.session_state.current_q = generate_question(st.session_state.subject, st.session_state.level, st.session_state.mode)
+                st.session_state.answered = False
+                st.session_state.last_result = None
+                st.session_state.new_sticker = None
+                st.session_state.speech_payload = (st.session_state.current_q["voice"], "pop", str(random.random()))
+                st.rerun()
 
 # ==========================================
-# 10. VIEW 2: STICKER BOOK
+# 10. VIEW 2: SYMMETRICAL 5x4 STICKER BOOK
 # ==========================================
 elif nav_choice == "🏆 My Sticker Book":
     st.markdown(f"## 🏆 {user['child_name']}'s Magical Sticker Album")
     st.write("Collect **1 new cartoon sticker** for every **3 stars** you win!")
 
-    all_stickers = ["🌟"] + STICKER_POOL
-    grid = st.columns(7)
+    all_stickers = ["🌟"] + STICKER_POOL  # 20 stickers = exact 5 columns x 4 rows
+    grid = st.columns(5, gap="medium")
     for idx, sticker in enumerate(all_stickers):
         unlocked = sticker in user["stickers"]
-        with grid[idx % 7]:
+        with grid[idx % 5]:
             st.markdown(f"""
-            <div style="background:{'#FFFDE7' if unlocked else '#ECEFF1'};
-                        border:4px solid {'#FFB300' if unlocked else '#CFD8DC'};
-                        border-radius:24px; padding:16px; text-align:center; margin-bottom:12px;
-                        box-shadow:0 5px 0 {'#FB8C00' if unlocked else '#B0BEC5'};">
-                <div style="font-size:3rem; opacity:{'1' if unlocked else '0.22'};">{sticker}</div>
-                <div style="font-size:0.85rem; font-weight:700; color:#455A64;">
+            <div style="background:{'#FFFFFF' if unlocked else '#E2E8F0'};
+                        border:3px solid {'#D97706' if unlocked else '#94A3B8'};
+                        border-radius:22px; padding:18px 10px; text-align:center; margin-bottom:14px;
+                        box-shadow:0 5px 0 {'#B45309' if unlocked else '#64748B'};">
+                <div style="font-size:3.2rem; opacity:{'1' if unlocked else '0.30'};">{sticker}</div>
+                <div style="font-size:0.95rem; font-weight:700; color:{'#0F172A' if unlocked else '#475569'}; margin-top:4px;">
                     {'Unlocked!' if unlocked else 'Locked'}
                 </div>
             </div>
             """, unsafe_allow_html=True)
 
 # ==========================================
-# 11. VIEW 3: PARENT PROGRESS REPORT
+# 11. VIEW 3: SYMMETRICAL PARENT PROGRESS REPORT
 # ==========================================
 else:
     st.markdown(f"## 📊 Parent & Teacher Development Report: {user['child_name']}")
@@ -1012,24 +1154,38 @@ else:
         import pandas as pd
         df = pd.DataFrame(rows, columns=["Subject", "Mode", "Level", "Correct", "Timestamp"])
 
-        m1, m2, m3, m4 = st.columns(4)
-        m1.metric("⭐ Total Stars", user["stars"])
-        m2.metric("📝 Exercises Played", len(df))
-        m3.metric("🎯 Overall Accuracy", f"{df['Correct'].mean() * 100:.0f}%")
-        m4.metric("🏆 Stickers Earned", f"{len(user['stickers'])} / {len(STICKER_POOL) + 1}")
+        m1, m2, m3, m4 = st.columns(4, gap="medium")
+        metrics = [
+            ("⭐ Total Stars", str(user["stars"])),
+            ("📝 Exercises Played", str(len(df))),
+            ("🎯 Overall Accuracy", f"{df['Correct'].mean() * 100:.0f}%"),
+            ("🏆 Stickers Earned", f"{len(user['stickers'])} / {len(STICKER_POOL) + 1}")
+        ]
+        for col, (lbl, val) in zip([m1, m2, m3, m4], metrics):
+            with col:
+                st.markdown(f"""
+                <div class="hud-card">
+                    <div class="hud-label">{lbl}</div>
+                    <div class="hud-value" style="font-size:1.6rem;">{val}</div>
+                </div>
+                """, unsafe_allow_html=True)
 
-        st.markdown("### 📚 Mastery by Learning World")
-        subj_summary = df.groupby("Subject").agg(
-            Questions=("Correct", "count"),
-            Correct_Answers=("Correct", "sum")
-        ).reset_index()
-        subj_summary["Accuracy (%)"] = (subj_summary["Correct_Answers"] / subj_summary["Questions"] * 100).round(1)
-        st.dataframe(subj_summary, use_container_width=True, hide_index=True)
+        st.write("")
+        c_left, c_right = st.columns(2, gap="large")
+        with c_left:
+            st.markdown("### 📚 Mastery by Learning World")
+            subj_summary = df.groupby("Subject").agg(
+                Questions=("Correct", "count"),
+                Correct_Answers=("Correct", "sum")
+            ).reset_index()
+            subj_summary["Accuracy (%)"] = (subj_summary["Correct_Answers"] / subj_summary["Questions"] * 100).round(1)
+            st.dataframe(subj_summary, use_container_width=True, hide_index=True)
 
-        st.markdown("### 📈 Progress by Age / Difficulty Level")
-        lvl_summary = df.groupby("Level").agg(
-            Attempts=("Correct", "count"),
-            Accuracy_Pct=("Correct", lambda s: round(s.mean() * 100, 1))
-        ).reset_index()
-        lvl_summary["Level Name"] = lvl_summary["Level"].map(LEVEL_NAMES)
-        st.bar_chart(lvl_summary.set_index("Level Name")["Accuracy_Pct"])
+        with c_right:
+            st.markdown("### 📈 Progress by Age / Skill Level")
+            lvl_summary = df.groupby("Level").agg(
+                Attempts=("Correct", "count"),
+                Accuracy_Pct=("Correct", lambda s: round(s.mean() * 100, 1))
+            ).reset_index()
+            lvl_summary["Level Name"] = lvl_summary["Level"].map(LEVEL_NAMES)
+            st.bar_chart(lvl_summary.set_index("Level Name")["Accuracy_Pct"])

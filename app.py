@@ -155,7 +155,7 @@ div.stButton > button:active {
 st.markdown(CUSTOM_CSS, unsafe_allow_html=True)
 
 # ==========================================
-# 2. PERMANENT CLOUD DATABASE (NEON POSTGRESQL + SQLITE FALLBACK)
+# 2. RESILIENT CLOUD DATABASE (NEON POSTGRESQL + SQLITE FALLBACK)
 # ==========================================
 def get_db_connection():
     db_url = None
@@ -166,27 +166,27 @@ def get_db_connection():
 
     if db_url:
         # Auto-clean accidental `psql '...'` copy-paste from Neon dashboard
-        clean_url = db_url.strip()
+        clean_url = str(db_url).strip()
         if clean_url.startswith("psql "):
             clean_url = clean_url[5:].strip()
         clean_url = clean_url.strip("'\"")
 
-        # Remove channel_binding param if present (can cause libpq issues on some containers)
+        # Strip channel_binding parameter if present to prevent libpq compatibility issues
         if "channel_binding=" in clean_url:
             parts = clean_url.split("?")
             if len(parts) == 2:
                 params = [p for p in parts[1].split("&") if not p.startswith("channel_binding=")]
                 clean_url = parts[0] + ("?" + "&".join(params) if params else "")
 
-        # Ensure sslmode=require for Neon cloud connections
+        # Enforce SSL required for Neon Cloud PostgreSQL
         if "sslmode=" not in clean_url:
             sep = "&" if "?" in clean_url else "?"
             clean_url += f"{sep}sslmode=require"
 
         try:
-            return psycopg2.connect(clean_url, connect_timeout=8), "postgres"
+            return psycopg2.connect(clean_url, connect_timeout=10), "postgres"
         except Exception as e:
-            st.warning(f"⚠️ Cloud database connection failed ({type(e).__name__}). Running in temporary local mode—check your DATABASE_URL in Streamlit Secrets.")
+            st.warning(f"⚠️ Cloud DB Error ({type(e).__name__}): {e} — Using temporary local storage.")
 
     return sqlite3.connect("wonderkids.db"), "sqlite"
 
@@ -351,10 +351,6 @@ init_db()
 # 3. ENERGETIC CHILD VOICE + XYLOPHONE SFX ENGINE
 # ==========================================
 def speak_child_voice(text: str, sfx: str = "none", trigger_id: str = "0"):
-    """
-    High-pitched, cheerful child-like speech synthesis (pitch=1.55, rate=1.12)
-    paired with bouncy Web Audio xylophone chimes.
-    """
     safe_text = text.replace('"', "'").replace("\n", " ")
     js_code = f"""
     <script>
@@ -379,10 +375,10 @@ def speak_child_voice(text: str, sfx: str = "none", trigger_id: str = "0"):
                     osc.stop(ctx.currentTime + start + dur);
                 }};
                 if (sfxType === "win") {{
-                    playXylophone(587.33, 0.00, 0.12); // D5
-                    playXylophone(739.99, 0.10, 0.12); // F#5
-                    playXylophone(880.00, 0.20, 0.14); // A5
-                    playXylophone(1174.66, 0.32, 0.35); // D6
+                    playXylophone(587.33, 0.00, 0.12);
+                    playXylophone(739.99, 0.10, 0.12);
+                    playXylophone(880.00, 0.20, 0.14);
+                    playXylophone(1174.66, 0.32, 0.35);
                 }} else if (sfxType === "oops") {{
                     playXylophone(392.00, 0.00, 0.16, 'triangle');
                     playXylophone(349.23, 0.16, 0.24, 'triangle');
@@ -401,8 +397,8 @@ def speak_child_voice(text: str, sfx: str = "none", trigger_id: str = "0"):
                 /Google UK English Female|Google US English|Samantha|Victoria|Zira|Tessa|Karen/i.test(v.name)
             );
             if (childFriendly) utter.voice = childFriendly;
-            utter.pitch = 1.58;   // Bright, energetic kid-buddy pitch!
-            utter.rate = 1.12;    // Bouncy, excited child tempo!
+            utter.pitch = 1.58;
+            utter.rate = 1.12;
             utter.volume = 1.0;
             window.speechSynthesis.speak(utter);
         }}
@@ -416,7 +412,6 @@ def speak_child_voice(text: str, sfx: str = "none", trigger_id: str = "0"):
 # 4. INTERACTIVE TAP-TO-COUNT / TAP-TO-HEAR PLAYGROUND
 # ==========================================
 def render_interactive_toys(items: list, label_hint: str = "Tap each picture to count & pop!"):
-    """Renders clickable bouncing cartoon cards that pop and speak numbers/names when tapped."""
     items_json = json.dumps(items)
     html_widget = f"""
     <div style="text-align:center; font-family:'Fredoka',sans-serif; padding:6px;">
@@ -477,9 +472,6 @@ MODES = {
 }
 
 def generate_question(subject: str, level: int, mode: str):
-    """Generates rich, age-appropriate questions for 3, 4, 5, and 6 year olds."""
-
-    # ---------------- 1. MATH KINGDOM ----------------
     if subject == "🔢 Math Kingdom":
         if mode == "🧩 Brainy Pattern & Logic":
             patterns = [
@@ -496,7 +488,7 @@ def generate_question(subject: str, level: int, mode: str):
             return {"visual": vis, "question": q, "answer": ans, "options": opts, "fact": fact,
                     "voice": f"Ooh, puzzle time! {q}", "toys": toys}
 
-        if level == 1:  # Age 3: Counting 1-5
+        if level == 1:
             n = random.randint(1, 5)
             emoji = random.choice(["🍎", "🦆", "⭐", "🍓", "🐢", "🧁"])
             opts = random.sample([str(i) for i in range(1, 6)], 3)
@@ -513,7 +505,7 @@ def generate_question(subject: str, level: int, mode: str):
                 "toys": [emoji] * n
             }
 
-        elif level == 2:  # Age 4: Counting 6-10 & More vs Less
+        elif level == 2:
             if random.choice([True, False]):
                 n = random.randint(6, 10)
                 emoji = random.choice(["🐠", "🦋", "🎈", "🍪", "🚗"])
@@ -540,7 +532,7 @@ def generate_question(subject: str, level: int, mode: str):
                     "toys": []
                 }
 
-        elif level == 3:  # Age 5: Visual Addition up to 10 + Number Bonds
+        elif level == 3:
             a, b = random.randint(1, 5), random.randint(1, 5)
             ans = a + b
             opts = list({str(ans), str(ans + 1), str(max(1, ans - 1)), str(ans + 2)})[:4]
@@ -555,7 +547,7 @@ def generate_question(subject: str, level: int, mode: str):
                 "toys": ["🦖"] * (a + b)
             }
 
-        else:  # Age 6: Subtraction, Telling Time (O'Clock), & Missing Addends
+        else:
             q_type = random.choice(["sub", "time", "missing"])
             if q_type == "sub":
                 a = random.randint(6, 12)
@@ -605,7 +597,6 @@ def generate_question(subject: str, level: int, mode: str):
                     "toys": []
                 }
 
-    # ---------------- 2. ALPHABET JUNGLE ----------------
     elif subject == "🔤 Alphabet Jungle":
         if mode == "🧩 Brainy Pattern & Logic":
             riddles = [
@@ -621,7 +612,7 @@ def generate_question(subject: str, level: int, mode: str):
                     "voice": f"Listen closely! {q}", "toys": []}
 
         bank = {
-            1: [  # Age 3: First Letters & Animal Sounds
+            1: [
                 ("🦁", "ROAR! What letter does LION start with?", "L", ["L", "B", "S", "M"],
                  "Lions are big cats whose mighty roar can be heard 5 miles away!"),
                 ("🍎", "Crunch! What letter does APPLE start with?", "A", ["A", "P", "T", "D"],
@@ -629,7 +620,7 @@ def generate_question(subject: str, level: int, mode: str):
                 ("🐸", "Ribbit! What letter does FROG start with?", "F", ["F", "G", "R", "K"],
                  "Frogs drink water right through their skin—no cup needed!")
             ],
-            2: [  # Age 4: Phonics & Beginning Sounds
+            2: [
                 ("🐘", "Stomp stomp! Which animal starts with the 'Eh' sound (Letter E)?", "🐘 Elephant", ["🐘 Elephant", "🐯 Tiger", "🐵 Monkey", "🐻 Bear"],
                  "Elephants use their long trunks like a nose, a hand, and even a snorkel!"),
                 ("🚀", "Zoom! Which picture starts with the 'Rrr' sound (Letter R)?", "🚀 Rocket", ["🚀 Rocket", "⛵ Boat", "🚲 Bike", "🚂 Train"],
@@ -637,7 +628,7 @@ def generate_question(subject: str, level: int, mode: str):
                 ("🐢", "Which slow-and-steady friend starts with the letter T?", "🐢 Turtle", ["🐢 Turtle", "🦆 Duck", "🐷 Pig", "🐝 Bee"],
                  "Turtles carry their cozy shell homes right on their backs!")
             ],
-            3: [  # Age 5: CVC Words & Vowels
+            3: [
                 ("☀️  _ U N", "Spell the bright yellow star in the sky! Missing letter?", "S (SUN)", ["S (SUN)", "B (BUN)", "R (RUN)", "F (FUN)"],
                  "The Sun is actually a giant, glowing star that keeps Earth warm!"),
                 ("🐱  _ A T", "Meow! Which letter completes the word _ A T?", "C (CAT)", ["C (CAT)", "D (DAT)", "P (PAT)", "M (MAT)"],
@@ -645,7 +636,7 @@ def generate_question(subject: str, level: int, mode: str):
                 ("🐷  P _ G", "Oink oink! Which vowel goes in the middle of P _ G?", "I (PIG)", ["I (PIG)", "A (PAG)", "O (POG)", "E (PEG)"],
                  "A, E, I, O, U are the 5 superstar vowels—almost every word needs one!")
             ],
-            4: [  # Age 6: Digraphs, Opposites, Plurals & Sentences
+            4: [
                 ("🦈  🚢  🐑", "Which sound do SHARK, SHIP, and SHEEP all start with?", "SH", ["SH", "CH", "TH", "ST"],
                  "When S and H team up together, they make the quiet 'SHHH' sound!"),
                 ("🦋  🐜", "Which word is the OPPOSITE of 'BIG'?", "🐜 TINY", ["🐜 TINY", "🐘 HUGE", "🦒 TALL", "🐳 GIANT"],
@@ -661,10 +652,9 @@ def generate_question(subject: str, level: int, mode: str):
         return {"visual": vis, "question": q, "answer": ans, "options": opts, "fact": fact,
                 "voice": f"Welcome to Alphabet Jungle! {q}", "toys": []}
 
-    # ---------------- 3. DISCOVERY LAB (SCIENCE) ----------------
     elif subject == "🔬 Discovery Lab":
         science_bank = {
-            1: [  # Age 3: Animals, Weather & Senses
+            1: [
                 ("🐄  🥛", "Moo! Which friendly farm animal gives us milk?", "🐄 Cow", ["🐄 Cow", "🐔 Chicken", "🐷 Pig", "🦆 Duck"],
                  "Cows have four stomach compartments to help them digest yummy grass!"),
                 ("🌧️  ☀️", "When sunshine shines through raindrops, what appears in the sky?", "🌈 Rainbow", ["🌈 Rainbow", "⛄ Snowman", "🌙 Moon", "🪨 Rock"],
@@ -672,13 +662,13 @@ def generate_question(subject: str, level: int, mode: str):
                 ("👃  🌸", "Which part of your body do you use to smell a yummy flower?", "👃 Nose", ["👃 Nose", "👂 Ear", "👀 Eyes", "🦶 Foot"],
                  "Your nose can recognize thousands of different smells—like cookies baking!")
             ],
-            2: [  # Age 4: Life Cycles & Plants
+            2: [
                 ("🐛  ➔  💤  ➔  ❓", "A hungry caterpillar sleeps in a chrysalis and wakes up as a...", "🦋 Butterfly", ["🦋 Butterfly", "🐸 Frog", "🐟 Fish", "🐦 Bird"],
                  "Butterflies taste flowers using tiny sensors on their FEET!"),
                 ("🌱  ☀️  💧", "What does a tiny seed need to grow into a tall flower?", "☀️ Sun & Water", ["☀️ Sun & Water", "🍕 Pizza", "🧸 Teddy Bear", "❄️ Ice Cubes"],
                  "Plants drink water through their roots like straws and make food from sunshine!")
             ],
-            3: [  # Age 5: Space, Magnets & Habitats
+            3: [
                 ("🪐  🌍  ☀️", "Which planet do WE live on?", "🌍 Earth", ["🌍 Earth", "🪐 Saturn", "🔴 Mars", "☀️ The Sun"],
                  "Earth is the only known planet with liquid oceans and living creatures!"),
                 ("🧲  📎", "Which object will stick to a super magnet?", "📎 Metal Paperclip", ["📎 Metal Paperclip", "🍌 Banana", "🧸 Plush Toy", "🖍️ Crayon"],
@@ -686,14 +676,14 @@ def generate_question(subject: str, level: int, mode: str):
                 ("🐧  ❄️", "Where does a fluffy penguin live?", "❄️ Icy Antarctica", ["❄️ Icy Antarctica", "🌵 Hot Desert", "🌴 Tropical Jungle", "🌋 Volcano"],
                  "Penguins have thick waterproof feathers that keep them cozy in freezing water!")
             ],
-            4: [  # Age 6: States of Matter, Food Chains & Human Body
+            4: [
                 ("🧊  🔥  💧", "When warm sunshine heats up an ice cube, it melts into...", "💧 Liquid Water", ["💧 Liquid Water", "🪨 Solid Rock", "🪵 Wood", "🏖️ Sand"],
                  "Water is a shape-shifter! It can be solid ice, liquid water, or invisible steam!"),
                 ("🦉  🦇  🌙", "Animals that sleep all day and wake up at night are called...", "🦉 Nocturnal", ["🦉 Nocturnal", "🐠 Aquatic", "🦖 Extinct", "🐧 Arctic"],
                  "Owls have giant eyes that capture tiny bits of moonlight so they can see in the dark!"),
                 ("🫀  💓", "Which muscle inside your chest pumps blood all around your body?", "❤️ Your Heart", ["❤️ Your Heart", "🧠 Your Brain", "🦴 Your Bones", "💪 Your Biceps"],
                  "Your heart is about the size of your fist and beats around 100,000 times every single day!"),
-                ("🦕  🦴", "Animals like T-Rex that lived millions of years ago and are no longer alive are...", "🦖 Extinct", ["🦖 Extinct", " hibernating", "Nocturnal", "Amphibians"],
+                ("🦕  🦴", "Animals like T-Rex that lived millions of years ago and are no longer alive are...", "🦖 Extinct", ["🦖 Extinct", "Hibernating", "Nocturnal", "Amphibians"],
                  "Scientists called paleontologists dig up dinosaur fossils to learn how they lived!")
             ]
         }
@@ -702,16 +692,15 @@ def generate_question(subject: str, level: int, mode: str):
         return {"visual": vis, "question": q, "answer": ans, "options": opts, "fact": fact,
                 "voice": f"Put on your scientist goggles! {q}", "toys": []}
 
-    # ---------------- 4. SHAPE & COLOR ISLAND ----------------
     else:
         shape_bank = {
-            1: [  # Age 3: Basic 2D Shapes
+            1: [
                 ("🍕  📐", "How many pointy corners does a TRIANGLE have?", "3 Corners", ["3 Corners", "4 Corners", "0 Corners", "5 Corners"],
                  "Tri means THREE! Tricycles have 3 wheels and triangles have 3 sides!"),
                 ("🌕  ⚽  🍪", "Which shape is completely round with ZERO corners?", "⭕ Circle", ["⭕ Circle", "⬛ Square", "🔺 Triangle", "⭐ Star"],
                  "Wheels are circles because round shapes roll smoothly without bumping!")
             ],
-            2: [  # Age 4: Color Mixing
+            2: [
                 ("🔴  ➕  🟡  =  ❓", "Mix RED paint and YELLOW paint together! What magic color do you get?", "🟠 Orange", ["🟠 Orange", "🟢 Green", "🟣 Purple", "🔵 Blue"],
                  "Red, Yellow, and Blue are Primary Colors—you can mix them to make a rainbow!"),
                 ("🔵  ➕  🟡  =  ❓", "Swirl BLUE and YELLOW paint together! Which color appears?", "🟢 Green", ["🟢 Green", "🟠 Orange", "🟣 Purple", "🩷 Pink"],
@@ -719,13 +708,13 @@ def generate_question(subject: str, level: int, mode: str):
                 ("🔴  ➕  🔵  =  ❓", "Mix RED and BLUE paint! Which royal color pops out?", "🟣 Purple", ["🟣 Purple", "🟢 Green", "🟠 Orange", "🟡 Yellow"],
                  "Purple was once so rare that only kings and queens could wear purple clothes!")
             ],
-            3: [  # Age 5: Polygons & Symmetry
+            3: [
                 ("🐝  🍯", "What 6-sided shape do busy bees build inside their honeycomb?", "⬡ Hexagon", ["⬡ Hexagon", "⭕ Circle", "🔺 Triangle", "⬛ Square"],
                  "Hexagons fit together with zero wasted space—bees are tiny math geniuses!"),
                 ("🛑", "How many sides does a red STOP sign (Octagon) have?", "8 Sides", ["8 Sides", "6 Sides", "4 Sides", "3 Sides"],
                  "Octo means EIGHT—just like an octopus with 8 arms and an octagon with 8 sides!")
             ],
-            4: [  # Age 6: 3D Solids & Fractions of Shapes
+            4: [
                 ("🎲  📦", "A 3D square box shape with 6 flat faces is called a...", "🧊 Cube", ["🧊 Cube", "⚽ Sphere", "🍦 Cone", "🥫 Cylinder"],
                  "2D shapes are flat like paper, while 3D shapes pop out so you can hold them!"),
                 ("🍦  🎉", "A party hat and an ice cream waffle share which 3D shape?", "🔺 Cone", ["🔺 Cone", "🧊 Cube", "⚽ Sphere", "📦 Box"],
@@ -894,7 +883,6 @@ with st.sidebar:
         st.session_state.current_q = None
         st.rerun()
 
-# Trigger child voice narration if queued
 if st.session_state.speech_payload:
     txt, sfx, tid = st.session_state.speech_payload
     speak_child_voice(txt, sfx, tid)
@@ -930,11 +918,9 @@ if nav_choice == "🎮 Play Learning Games":
     </div>
     """, unsafe_allow_html=True)
 
-    # Interactive Tap-to-Count Toys for Counting Questions
     if q_data.get("toys"):
         render_interactive_toys(q_data["toys"])
 
-    # Answer Buttons Grid
     cols = st.columns(len(q_data["options"]))
     for idx, opt in enumerate(q_data["options"]):
         with cols[idx]:
@@ -965,7 +951,6 @@ if nav_choice == "🎮 Play Learning Games":
                     )
                 st.rerun()
 
-    # Feedback & Fun Fact Card
     if st.session_state.answered:
         if st.session_state.last_result:
             st.balloons()

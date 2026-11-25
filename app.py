@@ -163,8 +163,31 @@ def get_db_connection():
         db_url = st.secrets.get("DATABASE_URL")
     except Exception:
         db_url = os.environ.get("DATABASE_URL")
+
     if db_url:
-        return psycopg2.connect(db_url), "postgres"
+        # Auto-clean accidental `psql '...'` copy-paste from Neon dashboard
+        clean_url = db_url.strip()
+        if clean_url.startswith("psql "):
+            clean_url = clean_url[5:].strip()
+        clean_url = clean_url.strip("'\"")
+
+        # Remove channel_binding param if present (can cause libpq issues on some containers)
+        if "channel_binding=" in clean_url:
+            parts = clean_url.split("?")
+            if len(parts) == 2:
+                params = [p for p in parts[1].split("&") if not p.startswith("channel_binding=")]
+                clean_url = parts[0] + ("?" + "&".join(params) if params else "")
+
+        # Ensure sslmode=require for Neon cloud connections
+        if "sslmode=" not in clean_url:
+            sep = "&" if "?" in clean_url else "?"
+            clean_url += f"{sep}sslmode=require"
+
+        try:
+            return psycopg2.connect(clean_url, connect_timeout=8), "postgres"
+        except Exception as e:
+            st.warning(f"⚠️ Cloud database connection failed ({type(e).__name__}). Running in temporary local mode—check your DATABASE_URL in Streamlit Secrets.")
+
     return sqlite3.connect("wonderkids.db"), "sqlite"
 
 def init_db():

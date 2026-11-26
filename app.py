@@ -1,248 +1,235 @@
+"""
+WonderKids Academy — Mission Control Edition
+Streamlit app · Neon Postgres (SQLite fallback) · browser voice + synth SFX
+"""
 import streamlit as st
 import streamlit.components.v1 as components
 import sqlite3
 import psycopg2
 import hashlib
+import hmac
 import random
 import json
 import os
 import re
+import time
+from html import escape
 from datetime import datetime
 
 # ==========================================
-# 1. PAGE CONFIG & HIGH-CONTRAST SYMMETRICAL THEME
+# 1. PAGE CONFIG & MISSION-CONTROL THEME
 # ==========================================
 st.set_page_config(
-    page_title="WonderKids Academy 🌈",
-    page_icon="🦁",
+    page_title="WonderKids Academy · Mission Control",
+    page_icon="🚀",
     layout="wide",
-    initial_sidebar_state="expanded"
+    initial_sidebar_state="expanded",
 )
+
+MISSION_LENGTH = 5      # questions per mission
+WARP_WINDOW_SEC = 10    # answer inside this window in Warp Speed for a bonus star
 
 CUSTOM_CSS = """
 <style>
-@import url('https://fonts.googleapis.com/css2?family=Fredoka:wght@500;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@600;800&family=Exo+2:wght@500;600;700&display=swap');
 
-html, body, [class*="css"] {
-    font-family: 'Fredoka', sans-serif !important;
-    color: #102A43 !important;
+:root{
+  --bg:#050816; --panel:rgba(11,19,43,.80); --panel-solid:#0B132B;
+  --line:rgba(34,211,238,.38); --line-soft:rgba(148,169,204,.22);
+  --cyan:#22D3EE; --violet:#8B5CF6; --amber:#FBBF24; --mint:#34D399; --rose:#FB7185;
+  --text:#E6F0FF; --muted:#9FB3D6;
 }
 
-/* Soft, Calm Sky-Mint Background for High Foreground Contrast */
-.stApp {
-    background: linear-gradient(160deg, #E0F2FE 0%, #FEF9C3 50%, #DCFCE7 100%);
-    background-attachment: fixed;
+.stApp{
+  font-family:'Exo 2',sans-serif;
+  color:var(--text);
+  background:
+    radial-gradient(circle at 12% 8%, rgba(139,92,246,.28), transparent 38%),
+    radial-gradient(circle at 88% 92%, rgba(34,211,238,.20), transparent 42%),
+    linear-gradient(rgba(34,211,238,.045) 1px, transparent 1px) 0 0/44px 44px,
+    linear-gradient(90deg, rgba(34,211,238,.045) 1px, transparent 1px) 0 0/44px 44px,
+    var(--bg);
+  background-attachment:fixed;
 }
+.stApp::before{            /* twinkling star layer */
+  content:""; position:fixed; inset:0; pointer-events:none; z-index:0;
+  background-image:
+    radial-gradient(1.5px 1.5px at 8% 22%, #fff, transparent),
+    radial-gradient(1px 1px at 22% 68%, #cfe9ff, transparent),
+    radial-gradient(1.5px 1.5px at 37% 12%, #fff, transparent),
+    radial-gradient(1px 1px at 51% 82%, #fff, transparent),
+    radial-gradient(1.5px 1.5px at 66% 35%, #bde9ff, transparent),
+    radial-gradient(1px 1px at 79% 58%, #fff, transparent),
+    radial-gradient(1.5px 1.5px at 92% 18%, #fff, transparent),
+    radial-gradient(1px 1px at 14% 90%, #fff, transparent),
+    radial-gradient(1px 1px at 59% 6%, #cfe9ff, transparent);
+  animation:twinkle 6s ease-in-out infinite alternate;
+}
+@keyframes twinkle{from{opacity:.55}to{opacity:1}}
 
-/* High-Contrast Sidebar */
-section[data-testid="stSidebar"] {
-    background-color: #FFFFFF !important;
-    border-right: 4px solid #38BDF8 !important;
-}
+footer{visibility:hidden}
+.stApp p, .stApp label, .stApp li, .stMarkdown{color:var(--text)}
+h1,h2,h3{font-family:'Orbitron',sans-serif !important; color:var(--text) !important; letter-spacing:.5px}
 
-section[data-testid="stSidebar"] * {
-    color: #102A43 !important;
+/* ---------- Sidebar ---------- */
+section[data-testid="stSidebar"]{
+  background:linear-gradient(180deg,#070D22,#0A1230) !important;
+  border-right:1px solid var(--line) !important;
 }
+section[data-testid="stSidebar"] *{color:var(--text)}
 
-/* Form Inputs & Labels High Contrast */
-label, .stMarkdown p, .stMarkdown h1, .stMarkdown h2, .stMarkdown h3 {
-    color: #102A43 !important;
+/* ---------- Inputs ---------- */
+div[data-baseweb="input"] > div, div[data-baseweb="select"] > div{
+  background:#0A1430 !important; border:1px solid var(--line) !important;
+  border-radius:12px !important; color:var(--text) !important;
 }
+input{color:var(--text) !important; font-weight:600 !important}
+div[data-baseweb="popover"] ul{background:#0A1430 !important}
+div[data-baseweb="popover"] li{color:var(--text) !important}
+div[data-baseweb="popover"] li:hover{background:rgba(34,211,238,.18) !important}
 
-div[data-baseweb="input"] > div, div[data-baseweb="select"] > div {
-    background-color: #F8FAFC !important;
-    border: 2px solid #0284C7 !important;
-    border-radius: 14px !important;
-    color: #0F172A !important;
+/* ---------- Buttons (answer keys & tools) ---------- */
+div.stButton > button{
+  width:100% !important; min-height:72px !important; padding:.8rem 1.1rem !important;
+  font-family:'Exo 2',sans-serif !important; font-size:1.3rem !important; font-weight:700 !important;
+  color:var(--text) !important;
+  background:linear-gradient(180deg, rgba(34,211,238,.14), rgba(11,19,43,.9)) !important;
+  border:1px solid var(--line) !important; border-radius:16px !important;
+  box-shadow:inset 0 0 0 1px rgba(255,255,255,.04), 0 0 0 rgba(34,211,238,0) !important;
+  transition:transform .12s ease, box-shadow .15s ease, border-color .15s ease !important;
 }
+div.stButton > button:hover{
+  transform:translateY(-2px) !important; border-color:var(--cyan) !important;
+  box-shadow:0 0 22px rgba(34,211,238,.45), inset 0 0 14px rgba(34,211,238,.18) !important;
+  color:#fff !important;
+}
+div.stButton > button:active{transform:translateY(1px) scale(.99) !important}
+div.stButton > button:focus-visible{outline:3px solid var(--amber) !important; outline-offset:3px}
+div.stButton > button:disabled{
+  opacity:.55; border-color:var(--line-soft) !important; box-shadow:none !important;
+  color:var(--muted) !important; background:rgba(11,19,43,.7) !important;
+}
+div[data-testid="stFormSubmitButton"] > button{
+  min-height:60px !important; font-size:1.2rem !important; font-weight:800 !important; width:100% !important;
+  color:#04121c !important; border:0 !important; border-radius:14px !important;
+  background:linear-gradient(90deg,var(--cyan),#7DD3FC) !important;
+  box-shadow:0 0 24px rgba(34,211,238,.45) !important;
+}
+div[data-testid="stFormSubmitButton"] > button:hover{filter:brightness(1.1); color:#04121c !important}
 
-input {
-    color: #0F172A !important;
-    font-weight: 600 !important;
+/* ---------- Panels with HUD corner brackets ---------- */
+.panel{
+  position:relative; background:var(--panel); border:1px solid var(--line-soft);
+  border-radius:14px; padding:20px 24px; backdrop-filter:blur(6px);
+  box-shadow:0 12px 40px rgba(0,0,0,.35);
 }
+.panel::before,.panel::after{
+  content:""; position:absolute; width:22px; height:22px; pointer-events:none;
+  border:2px solid var(--cyan); opacity:.9;
+}
+.panel::before{top:-1px; left:-1px; border-right:0; border-bottom:0; border-top-left-radius:14px}
+.panel::after{bottom:-1px; right:-1px; border-left:0; border-top:0; border-bottom-right-radius:14px}
+.panel h3{margin:0 0 4px 0; font-size:1.15rem}
 
-/* Symmetrical, High-Contrast 3D Candy Buttons */
-div.stButton > button {
-    border-radius: 22px !important;
-    font-size: 1.35rem !important;
-    font-weight: 700 !important;
-    min-height: 68px !important;
-    padding: 0.85rem 1.2rem !important;
-    border: 3px solid #0284C7 !important;
-    background: #FFFFFF !important;
-    color: #0F172A !important;
-    box-shadow: 0 6px 0 #0284C7, 0 8px 16px rgba(15, 23, 42, 0.10) !important;
-    transition: transform 0.12s ease, box-shadow 0.12s ease, background-color 0.12s ease !important;
-    width: 100% !important;
-}
+/* ---------- Hero + boot log ---------- */
+.hero{display:flex; flex-wrap:wrap; gap:28px; align-items:center; justify-content:space-between; margin-bottom:18px}
+.hero-main{flex:1 1 380px}
+.hero-title{font-family:'Orbitron',sans-serif; font-weight:800; font-size:clamp(2rem,5vw,3.4rem); line-height:1.1;
+  color:#fff; text-shadow:0 0 28px rgba(34,211,238,.55)}
+.hero-sub{font-size:1.2rem; color:var(--muted); margin:10px 0 16px 0}
+.chip{display:inline-block; padding:5px 14px; margin:3px 6px 3px 0; border-radius:999px;
+  border:1px solid var(--line); background:rgba(34,211,238,.08); font-weight:700; font-size:.95rem}
+.boot{flex:1 1 320px; font-family:'Exo 2',monospace; font-size:.98rem; color:var(--mint);
+  background:rgba(2,8,23,.7); border:1px solid var(--line-soft); border-radius:12px; padding:14px 16px}
+.boot-line{opacity:0; animation:bootIn .01s forwards; animation-delay:var(--d)}
+.boot-line b{color:var(--amber)}
+@keyframes bootIn{to{opacity:1}}
 
-div.stButton > button:hover {
-    transform: translateY(-3px) !important;
-    border-color: #D97706 !important;
-    background: #FEF08A !important;
-    color: #0F172A !important;
-    box-shadow: 0 9px 0 #D97706, 0 12px 20px rgba(15, 23, 42, 0.15) !important;
-}
+/* ---------- Crew card (sidebar) ---------- */
+.crew{text-align:center; padding:16px 12px; border:1px solid var(--line); border-radius:16px;
+  background:rgba(34,211,238,.06); margin-bottom:14px}
+.orbit{position:relative; width:92px; height:92px; margin:0 auto 8px auto; display:flex; align-items:center; justify-content:center;
+  font-size:2.8rem; border-radius:50%; border:2px dashed var(--cyan); animation:spin 18s linear infinite}
+.orbit > span{animation:spin 18s linear infinite reverse; display:block}
+@keyframes spin{to{transform:rotate(360deg)}}
+.crew-name{font-family:'Orbitron',sans-serif; font-size:1.05rem; margin:2px 0}
+.rank{color:var(--amber); font-weight:700}
+.bar{height:10px; border-radius:99px; background:rgba(148,169,204,.2); overflow:hidden; margin-top:8px}
+.bar > div{height:100%; border-radius:99px; background:linear-gradient(90deg,var(--cyan),var(--violet))}
+.tiny{font-size:.85rem; color:var(--muted); margin-top:4px}
 
-div.stButton > button:active {
-    transform: translateY(3px) !important;
-    box-shadow: 0 2px 0 #0284C7 !important;
-}
+/* ---------- HUD cards ---------- */
+.hud{border:1px solid var(--line-soft); border-radius:14px; padding:12px 14px; background:var(--panel); height:100%}
+.hud-label{font-size:.85rem; color:var(--muted); font-weight:600}
+.hud-value{font-family:'Orbitron',sans-serif; font-size:1.05rem; margin-top:4px; color:#fff}
 
-div.stButton > button:disabled {
-    background: #E2E8F0 !important;
-    border-color: #94A3B8 !important;
-    color: #475569 !important;
-    box-shadow: none !important;
-}
+/* ---------- Mission route ---------- */
+.route{display:flex; align-items:center; margin:14px 4px 4px 4px}
+.route .link{flex:1; height:2px; background:linear-gradient(90deg,var(--line),var(--line-soft))}
+.node{width:44px; height:44px; border-radius:50%; display:flex; align-items:center; justify-content:center;
+  font-size:1.25rem; border:2px solid var(--line-soft); background:var(--panel-solid); flex:0 0 auto}
+.node.ok{border-color:var(--mint); box-shadow:0 0 16px rgba(52,211,153,.55); color:var(--mint)}
+.node.bad{border-color:var(--rose); box-shadow:0 0 14px rgba(251,113,133,.45); color:var(--rose)}
+.node.now{border-color:var(--cyan); box-shadow:0 0 20px rgba(34,211,238,.7); animation:pulse 1.8s ease-in-out infinite}
+@keyframes pulse{50%{transform:scale(1.1)}}
+.route-cap{font-size:.9rem; color:var(--muted); margin:2px 4px 10px 4px}
 
-/* Form Submit Buttons */
-div[data-testid="stFormSubmitButton"] > button {
-    border-radius: 20px !important;
-    font-size: 1.25rem !important;
-    font-weight: 700 !important;
-    min-height: 58px !important;
-    border: 3px solid #15803D !important;
-    background: #22C55E !important;
-    color: #FFFFFF !important;
-    box-shadow: 0 6px 0 #15803D !important;
-    width: 100% !important;
-}
+/* ---------- Question stage ---------- */
+.stage{text-align:center; margin:12px 0 18px 0; border-color:var(--line)}
+.nova{display:inline-flex; align-items:center; gap:12px; padding:6px 18px; border-radius:999px;
+  border:1px solid var(--amber); background:rgba(251,191,36,.10); margin-bottom:6px}
+.nova-av{font-size:2rem}
+.nova-say{font-weight:700; color:var(--amber); overflow:hidden; white-space:nowrap; max-width:0;
+  border-right:2px solid var(--amber); animation:typing 1.8s steps(40) .2s forwards}
+@keyframes typing{to{max-width:48ch; border-right-color:transparent}}
+.holo{position:relative; overflow:hidden; margin:12px auto; padding:22px 16px;
+  font-size:clamp(2rem,5vw,3.6rem); letter-spacing:8px; line-height:1.35; word-break:break-word;
+  border:1px solid var(--line); border-radius:18px;
+  background:linear-gradient(180deg,rgba(34,211,238,.12),rgba(139,92,246,.10));
+  text-shadow:0 0 18px rgba(34,211,238,.55)}
+.holo::after{content:""; position:absolute; inset:0; pointer-events:none;
+  background:repeating-linear-gradient(0deg, rgba(255,255,255,.045) 0 1px, transparent 1px 4px)}
+.holo::before{content:""; position:absolute; left:0; right:0; top:-35%; height:35%; pointer-events:none;
+  background:linear-gradient(180deg,transparent,rgba(34,211,238,.25),transparent); animation:sweep 5s linear infinite}
+@keyframes sweep{to{top:110%}}
+.q{font-size:clamp(1.3rem,3vw,1.9rem); font-weight:700; line-height:1.35; color:#fff; margin-top:6px}
 
-div[data-testid="stFormSubmitButton"] > button:hover {
-    background: #16A34A !important;
-    color: #FFFFFF !important;
-}
+/* ---------- Result / debrief ---------- */
+.result{border-radius:14px; padding:16px 20px; margin-top:10px; font-size:1.2rem; font-weight:700}
+.result.ok{border:1px solid var(--mint); background:rgba(52,211,153,.12); box-shadow:0 0 24px rgba(52,211,153,.25)}
+.result.bad{border:1px solid var(--amber); background:rgba(251,191,36,.10)}
+.result small{display:block; font-weight:600; color:var(--muted); margin-top:4px; font-size:.95rem}
+.fact{margin-top:12px; padding:16px 20px; border-radius:14px; border:1px solid var(--line);
+  border-left:8px solid var(--cyan); background:rgba(34,211,238,.08); font-size:1.15rem}
+.debrief{text-align:center; margin-top:16px}
+.debrief .big{font-family:'Orbitron',sans-serif; font-size:2rem; color:var(--amber); text-shadow:0 0 20px rgba(251,191,36,.5)}
+.rankup{margin-top:10px; padding:14px; text-align:center; border-radius:14px; border:1px solid var(--violet);
+  background:rgba(139,92,246,.18); font-family:'Orbitron',sans-serif; font-size:1.1rem}
 
-/* Rainbow Banner Header */
-.rainbow-banner {
-    background: linear-gradient(90deg, #EF4444, #F59E0B, #10B981, #0EA5E9, #8B5CF6);
-    padding: 5px;
-    border-radius: 30px;
-    box-shadow: 0 10px 24px rgba(15, 23, 42, 0.12);
-    margin-bottom: 22px;
-}
+/* ---------- Vault ---------- */
+.artifact{border-radius:16px; padding:16px 8px; text-align:center; margin-bottom:14px; border:1px solid var(--line-soft); background:var(--panel)}
+.artifact.on{border-color:var(--amber); box-shadow:0 0 20px rgba(251,191,36,.35)}
+.artifact .em{font-size:3rem}
+.artifact.off .em{filter:grayscale(1) brightness(.35)}
+.artifact .st{font-size:.9rem; font-weight:700; margin-top:4px; color:var(--muted)}
+.artifact.on .st{color:var(--amber)}
 
-.banner-inner {
-    background: #FFFFFF;
-    border-radius: 26px;
-    padding: 24px 28px;
-    text-align: center;
+@media (prefers-reduced-motion: reduce){
+  .stApp::before,.orbit,.orbit>span,.node.now,.holo::before{animation:none !important}
+  .nova-say{animation:none !important; max-width:none; border-right:0}
+  .boot-line{animation:none !important; opacity:1}
 }
-
-/* Symmetrical Auth Panel Card */
-.auth-card {
-    background: #FFFFFF;
-    border-radius: 26px;
-    padding: 22px 24px;
-    border: 4px solid #38BDF8;
-    box-shadow: 0 8px 0 #0284C7;
-    margin-bottom: 12px;
-}
-
-/* Top 4-Card Symmetrical HUD */
-.hud-card {
-    background: #FFFFFF;
-    border: 3px solid #38BDF8;
-    border-radius: 20px;
-    padding: 14px 12px;
-    text-align: center;
-    box-shadow: 0 5px 0 #0284C7;
-    height: 100%;
-}
-
-.hud-label {
-    font-size: 0.85rem;
-    font-weight: 700;
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-    color: #0369A1 !important;
-}
-
-.hud-value {
-    font-size: 1.25rem;
-    font-weight: 700;
-    color: #0F172A !important;
-    margin-top: 4px;
-}
-
-/* Main Centered Question Stage */
-.stage-card {
-    background: #FFFFFF;
-    border-radius: 32px;
-    padding: 28px 32px;
-    border: 5px solid #0284C7;
-    box-shadow: 0 10px 0 #0369A1, 0 16px 32px rgba(15, 23, 42, 0.12);
-    text-align: center;
-    margin: 18px 0 22px 0;
-}
-
-@keyframes gentleBob {
-    0%, 100% { transform: translateY(0px); }
-    50% { transform: translateY(-6px); }
-}
-
-.mascot-pill {
-    display: inline-flex;
-    align-items: center;
-    gap: 12px;
-    background: #FEF3C7;
-    border: 3px solid #D97706;
-    border-radius: 999px;
-    padding: 8px 22px;
-    margin-bottom: 16px;
-}
-
-.mascot-avatar {
-    font-size: 2.3rem;
-    animation: gentleBob 2.2s ease-in-out infinite;
-}
-
-.visual-stage {
-    font-size: 4rem;
-    letter-spacing: 12px;
-    margin: 14px auto;
-    padding: 22px 18px;
-    background: #F0F9FF;
-    border-radius: 24px;
-    border: 3px dashed #0284C7;
-    color: #0F172A !important;
-}
-
-.question-title {
-    color: #0F172A !important;
-    font-size: 1.85rem !important;
-    font-weight: 700 !important;
-    line-height: 1.35 !important;
-    margin: 14px 0 4px 0 !important;
-}
-
-.fact-box {
-    background: #ECFDF5;
-    border: 3px solid #059669;
-    border-left: 12px solid #047857;
-    border-radius: 22px;
-    padding: 20px 24px;
-    font-size: 1.2rem;
-    color: #064E3B !important;
-    margin-top: 16px;
-    box-shadow: 0 6px 0 #047857;
-}
-
-.badge-pill {
-    display: inline-block;
-    padding: 6px 16px;
-    border-radius: 999px;
-    font-weight: 700;
-    font-size: 1rem;
-    background: #FEF08A;
-    border: 2px solid #CA8A04;
-    color: #713F12 !important;
-    margin: 4px;
-}
+@media (max-width:640px){ div.stButton > button{font-size:1.1rem !important; min-height:64px !important} }
 </style>
 """
 st.markdown(CUSTOM_CSS, unsafe_allow_html=True)
+
+
+def ui(markup: str):
+    """Render HTML safely through markdown (no blank lines / indentation = no code-block surprises)."""
+    cleaned = "\n".join(line.strip() for line in markup.splitlines() if line.strip())
+    st.markdown(cleaned, unsafe_allow_html=True)
+
 
 # ==========================================
 # 2. RESILIENT CLOUD DATABASE (NEON POSTGRESQL + SQLITE FALLBACK)
@@ -280,70 +267,78 @@ def get_db_connection():
         try:
             return psycopg2.connect(clean_url, connect_timeout=10), "postgres"
         except Exception as e:
-            st.warning(f"⚠️ Cloud DB Error ({type(e).__name__}): {e} — Using local storage.")
+            if not st.session_state.get("_db_warned"):
+                st.session_state["_db_warned"] = True
+                st.warning(f"⚠️ Cloud database unreachable ({type(e).__name__}). Running on local storage.")
 
     return sqlite3.connect("wonderkids.db"), "sqlite"
 
+
+@st.cache_resource(show_spinner=False)
 def init_db():
     conn, db_type = get_db_connection()
     c = conn.cursor()
-    if db_type == "postgres":
-        c.execute("""
-            CREATE TABLE IF NOT EXISTS users (
-                id SERIAL PRIMARY KEY,
-                username TEXT UNIQUE NOT NULL,
-                password_hash TEXT NOT NULL,
-                child_name TEXT NOT NULL,
-                age_group INTEGER NOT NULL,
-                avatar TEXT NOT NULL,
-                stars INTEGER DEFAULT 0,
-                streak INTEGER DEFAULT 0,
-                stickers TEXT DEFAULT '["🌟"]',
-                created_at TEXT
-            )
-        """)
-        c.execute("""
-            CREATE TABLE IF NOT EXISTS progress_log (
-                id SERIAL PRIMARY KEY,
-                user_id INTEGER NOT NULL REFERENCES users(id),
-                subject TEXT NOT NULL,
-                mode TEXT NOT NULL,
-                level INTEGER NOT NULL,
-                is_correct INTEGER NOT NULL,
-                timestamp TEXT NOT NULL
-            )
-        """)
-    else:
-        c.execute("""
-            CREATE TABLE IF NOT EXISTS users (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                username TEXT UNIQUE NOT NULL,
-                password_hash TEXT NOT NULL,
-                child_name TEXT NOT NULL,
-                age_group INTEGER NOT NULL,
-                avatar TEXT NOT NULL,
-                stars INTEGER DEFAULT 0,
-                streak INTEGER DEFAULT 0,
-                stickers TEXT DEFAULT '["🌟"]',
-                created_at TEXT
-            )
-        """)
-        c.execute("""
-            CREATE TABLE IF NOT EXISTS progress_log (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                user_id INTEGER NOT NULL,
-                subject TEXT NOT NULL,
-                mode TEXT NOT NULL,
-                level INTEGER NOT NULL,
-                is_correct INTEGER NOT NULL,
-                timestamp TEXT NOT NULL
-            )
-        """)
+    pk = "SERIAL PRIMARY KEY" if db_type == "postgres" else "INTEGER PRIMARY KEY AUTOINCREMENT"
+    c.execute(f"""
+        CREATE TABLE IF NOT EXISTS users (
+            id {pk},
+            username TEXT UNIQUE NOT NULL,
+            password_hash TEXT NOT NULL,
+            child_name TEXT NOT NULL,
+            age_group INTEGER NOT NULL,
+            avatar TEXT NOT NULL,
+            stars INTEGER DEFAULT 0,
+            streak INTEGER DEFAULT 0,
+            stickers TEXT DEFAULT '["🌟"]',
+            created_at TEXT
+        )
+    """)
+    ref = " REFERENCES users(id)" if db_type == "postgres" else ""
+    c.execute(f"""
+        CREATE TABLE IF NOT EXISTS progress_log (
+            id {pk},
+            user_id INTEGER NOT NULL{ref},
+            subject TEXT NOT NULL,
+            mode TEXT NOT NULL,
+            level INTEGER NOT NULL,
+            is_correct INTEGER NOT NULL,
+            timestamp TEXT NOT NULL
+        )
+    """)
     conn.commit()
     conn.close()
+    return True
 
+
+# --- Passwords: salted PBKDF2. Legacy unsalted SHA-256 hashes still work and are upgraded on next login.
 def hash_pw(password: str) -> str:
-    return hashlib.sha256(password.encode()).hexdigest()
+    salt = os.urandom(16)
+    dk = hashlib.pbkdf2_hmac("sha256", password.encode(), salt, 200_000)
+    return f"pbkdf2${salt.hex()}${dk.hex()}"
+
+
+def verify_pw(password: str, stored: str) -> bool:
+    if stored.startswith("pbkdf2$"):
+        try:
+            _, salt_hex, dk_hex = stored.split("$")
+            dk = hashlib.pbkdf2_hmac("sha256", password.encode(), bytes.fromhex(salt_hex), 200_000)
+            return hmac.compare_digest(dk.hex(), dk_hex)
+        except Exception:
+            return False
+    legacy = hashlib.sha256(password.encode()).hexdigest()
+    return hmac.compare_digest(legacy, stored)
+
+
+USER_COLS = "id, username, child_name, age_group, avatar, stars, streak, stickers"
+
+
+def _row_to_user(row):
+    return {
+        "id": row[0], "username": row[1], "child_name": row[2],
+        "age_group": row[3], "avatar": row[4], "stars": row[5],
+        "streak": row[6], "stickers": json.loads(row[7]),
+    }
+
 
 def create_user(username, password, child_name, age_group, avatar):
     conn, db_type = get_db_connection()
@@ -353,68 +348,73 @@ def create_user(username, password, child_name, age_group, avatar):
         c.execute(
             f"""INSERT INTO users (username, password_hash, child_name, age_group, avatar, stars, streak, stickers, created_at)
                 VALUES ({ph}, {ph}, {ph}, {ph}, {ph}, 0, 0, {ph}, {ph})""",
-            (username.lower().strip(), hash_pw(password), child_name.strip(), age_group, avatar, json.dumps(["🌟"]), datetime.now().isoformat())
+            (username.lower().strip(), hash_pw(password), child_name.strip(), age_group, avatar,
+             json.dumps(["🌟"]), datetime.now().isoformat()),
         )
         conn.commit()
-        return True, "Account created! Let's play!"
+        return True, "Account created."
     except Exception:
         conn.rollback()
-        return False, "That username is already taken! Try another fun name."
+        return False, "That username is taken. Pick a different explorer name."
     finally:
         conn.close()
+
 
 def authenticate_user(username, password):
     conn, db_type = get_db_connection()
     ph = "%s" if db_type == "postgres" else "?"
     c = conn.cursor()
-    c.execute(
-        f"SELECT id, username, child_name, age_group, avatar, stars, streak, stickers FROM users WHERE username={ph} AND password_hash={ph}",
-        (username.lower().strip(), hash_pw(password))
-    )
+    c.execute(f"SELECT {USER_COLS}, password_hash FROM users WHERE username={ph}", (username.lower().strip(),))
     row = c.fetchone()
+    user = None
+    if row and verify_pw(password, row[8]):
+        user = _row_to_user(row[:8])
+        if not row[8].startswith("pbkdf2$"):      # silent upgrade of legacy hash
+            c.execute(f"UPDATE users SET password_hash={ph} WHERE id={ph}", (hash_pw(password), user["id"]))
+            conn.commit()
     conn.close()
-    if row:
-        return {
-            "id": row[0], "username": row[1], "child_name": row[2],
-            "age_group": row[3], "avatar": row[4], "stars": row[5],
-            "streak": row[6], "stickers": json.loads(row[7])
-        }
-    return None
+    return user
+
 
 def get_user_by_id(user_id):
     conn, db_type = get_db_connection()
     ph = "%s" if db_type == "postgres" else "?"
     c = conn.cursor()
-    c.execute(f"SELECT id, username, child_name, age_group, avatar, stars, streak, stickers FROM users WHERE id={ph}", (user_id,))
+    c.execute(f"SELECT {USER_COLS} FROM users WHERE id={ph}", (user_id,))
     row = c.fetchone()
     conn.close()
-    if row:
-        return {
-            "id": row[0], "username": row[1], "child_name": row[2],
-            "age_group": row[3], "avatar": row[4], "stars": row[5],
-            "streak": row[6], "stickers": json.loads(row[7])
-        }
-    return None
+    return _row_to_user(row) if row else None
+
 
 STICKER_POOL = ["🦄", "🦖", "🚀", "🌈", "🐬", "🐼", "🦋", "🍓", "🎨", "🏆", "🐢", "🦊", "🐘", "🪐", "🐙", "🦁", "🍦", "🚂", "🦕"]
 
-def record_attempt(user_id, subject, mode, level, is_correct):
+
+def record_attempt(user_id, subject, mode, level, is_correct, fast=False, clean=False):
+    """Logs the attempt, updates stars/streak/stickers. Returns dict(sticker, gained, notes)."""
     conn, db_type = get_db_connection()
     ph = "%s" if db_type == "postgres" else "?"
     c = conn.cursor()
     c.execute(
         f"INSERT INTO progress_log (user_id, subject, mode, level, is_correct, timestamp) VALUES ({ph}, {ph}, {ph}, {ph}, {ph}, {ph})",
-        (user_id, subject, mode, level, 1 if is_correct else 0, datetime.now().isoformat())
+        (user_id, subject, mode, level, 1 if is_correct else 0, datetime.now().isoformat()),
     )
     c.execute(f"SELECT stars, streak, stickers FROM users WHERE id={ph}", (user_id,))
     stars, streak, stickers_json = c.fetchone()
     stickers = json.loads(stickers_json)
 
-    new_sticker = None
+    gained, notes, new_sticker = 0, [], None
     if is_correct:
-        stars += 1
         streak += 1
-        if stars % 3 == 0:
+        gained = 1
+        if clean and fast:
+            gained += 1
+            notes.append("⚡ Warp bonus +1")
+        if clean and streak % 5 == 0:
+            gained += 1
+            notes.append(f"🔥 {streak}-in-a-row bonus +1")
+        before = stars
+        stars += gained
+        if stars // 3 > before // 3:
             available = [s for s in STICKER_POOL if s not in stickers]
             if available:
                 new_sticker = random.choice(available)
@@ -424,11 +424,12 @@ def record_attempt(user_id, subject, mode, level, is_correct):
 
     c.execute(
         f"UPDATE users SET stars={ph}, streak={ph}, stickers={ph} WHERE id={ph}",
-        (stars, streak, json.dumps(stickers), user_id)
+        (stars, streak, json.dumps(stickers), user_id),
     )
     conn.commit()
     conn.close()
-    return new_sticker
+    return {"sticker": new_sticker, "gained": gained, "notes": notes}
+
 
 def get_progress_stats(user_id):
     conn, db_type = get_db_connection()
@@ -439,133 +440,194 @@ def get_progress_stats(user_id):
     conn.close()
     return rows
 
+
 init_db()
 
 # ==========================================
-# 3. ENERGETIC CHILD VOICE + XYLOPHONE SFX ENGINE
+# 3. RANKS & DISPLAY NAMES
 # ==========================================
-def speak_child_voice(text: str, sfx: str = "none", trigger_id: str = "0"):
-    safe_text = text.replace('"', "'").replace("\n", " ")
-    js_code = f"""
-    <script>
-    (function() {{
-        const msgText = "{safe_text}";
-        const sfxType = "{sfx}";
+RANKS = [(0, "Cadet", "🛰️"), (10, "Pilot", "🧑‍🚀"), (25, "Navigator", "🧭"),
+         (50, "Captain", "🎖️"), (100, "Commander", "🛡️"), (200, "Admiral", "👑")]
 
-        try {{
-            const AudioCtx = window.AudioContext || window.webkitAudioContext;
-            if (AudioCtx) {{
-                const ctx = new AudioCtx();
-                const playXylophone = (freq, start, dur, wave='sine') => {{
-                    const osc = ctx.createOscillator();
-                    const gain = ctx.createGain();
-                    osc.type = wave;
-                    osc.frequency.setValueAtTime(freq, ctx.currentTime + start);
-                    gain.gain.setValueAtTime(0.22, ctx.currentTime + start);
-                    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + start + dur);
-                    osc.connect(gain);
-                    gain.connect(ctx.destination);
-                    osc.start(ctx.currentTime + start);
-                    osc.stop(ctx.currentTime + start + dur);
-                }};
-                if (sfxType === "win") {{
-                    playXylophone(587.33, 0.00, 0.12);
-                    playXylophone(739.99, 0.10, 0.12);
-                    playXylophone(880.00, 0.20, 0.14);
-                    playXylophone(1174.66, 0.32, 0.35);
-                }} else if (sfxType === "oops") {{
-                    playXylophone(392.00, 0.00, 0.16, 'triangle');
-                    playXylophone(349.23, 0.16, 0.24, 'triangle');
-                }} else if (sfxType === "pop") {{
-                    playXylophone(880.00, 0.00, 0.08, 'sine');
-                    playXylophone(1046.50, 0.07, 0.10, 'sine');
-                }}
-            }}
-        }} catch(e) {{}}
 
-        if ('speechSynthesis' in window) {{
-            window.speechSynthesis.cancel();
-            const utter = new SpeechSynthesisUtterance(msgText);
-            const voices = window.speechSynthesis.getVoices();
-            const childFriendly = voices.find(v =>
-                /Google UK English Female|Google US English|Samantha|Victoria|Zira|Tessa|Karen/i.test(v.name)
-            );
-            if (childFriendly) utter.voice = childFriendly;
-            utter.pitch = 1.58;
-            utter.rate = 1.12;
-            utter.volume = 1.0;
-            window.speechSynthesis.speak(utter);
-        }}
-    }})();
-    </script>
-    <div style="display:none;">{trigger_id}</div>
-    """
-    components.html(js_code, height=0)
+def rank_info(stars: int):
+    idx = max(i for i, (t, _, _) in enumerate(RANKS) if stars >= t)
+    cur = RANKS[idx]
+    nxt = RANKS[idx + 1] if idx + 1 < len(RANKS) else None
+    pct = 100 if not nxt else int((stars - cur[0]) / (nxt[0] - cur[0]) * 100)
+    return {"idx": idx, "name": cur[1], "icon": cur[2], "next": nxt, "pct": pct,
+            "to_go": (nxt[0] - stars) if nxt else 0}
 
-# ==========================================
-# 4. INTERACTIVE TAP-TO-COUNT / TAP-TO-HEAR PLAYGROUND
-# ==========================================
-def render_interactive_toys(items: list, label_hint: str = "Tap each picture to count & pop!"):
-    items_json = json.dumps(items)
-    html_widget = f"""
-    <div style="text-align:center; font-family:'Fredoka',sans-serif; padding:6px;">
-      <div style="font-size:1.05rem; font-weight:700; color:#0F172A; margin-bottom:10px;">👆 {label_hint}</div>
-      <div id="toy-box" style="display:flex; flex-wrap:wrap; justify-content:center; gap:12px;"></div>
-      <div id="tap-readout" style="margin-top:8px; font-size:1.35rem; font-weight:700; color:#B45309; min-height:28px;"></div>
-    </div>
-    <script>
-      const toys = {items_json};
-      const box = document.getElementById('toy-box');
-      const readout = document.getElementById('tap-readout');
-      let count = 0;
 
-      toys.forEach((item) => {{
-        const btn = document.createElement('button');
-        btn.innerText = item;
-        btn.style.cssText = `
-          font-size: 3rem; background: #FFFFFF; border: 4px solid #0284C7;
-          border-radius: 20px; padding: 10px 18px; cursor: pointer;
-          box-shadow: 0 5px 0 #0369A1; transition: transform 0.15s;
-        `;
-        btn.onclick = () => {{
-          if (!btn.dataset.tapped) {{
-            btn.dataset.tapped = "1";
-            count++;
-            btn.style.background = "#BBF7D0";
-            btn.style.borderColor = "#15803D";
-            btn.style.boxShadow = "0 5px 0 #15803D";
-            btn.style.transform = "scale(1.12)";
-            readout.innerText = "⭐ Counted: " + count + "!";
-            if ('speechSynthesis' in window) {{
-              window.speechSynthesis.cancel();
-              const u = new SpeechSynthesisUtterance(String(count));
-              u.pitch = 1.6; u.rate = 1.15;
-              window.speechSynthesis.speak(u);
-            }}
-          }}
-        }};
-        box.appendChild(btn);
-      }});
-    </script>
-    """
-    components.html(html_widget, height=170)
-
-# ==========================================
-# 5. EXPANDED EXERCISE BANK (ALWAYS 4 SYMMETRICAL OPTIONS)
-# ==========================================
-LEVEL_NAMES = {
-    1: "🌱 Level 1: Tiny Sprout (Age 3)",
-    2: "🐥 Level 2: Curious Explorer (Age 4)",
-    3: "🦊 Level 3: Super Adventurer (Age 5)",
-    4: "🚀 Level 4: Brainy Champion (Age 6)"
+# Keys stay identical to the old app so existing progress data keeps working; only the labels changed.
+SECTOR_NAMES = {
+    "🔢 Math Kingdom": "🔢 Number Nebula",
+    "🔤 Alphabet Jungle": "🔤 Letter Galaxy",
+    "🔬 Discovery Lab": "🔬 Science Station",
+    "🎨 Shape & Color Island": "🎨 Shape & Color Moon",
 }
-
 MODES = {
-    "🎈 Adventure Mode": "Playful learning with fun facts & cheering!",
-    "⚡ Lightning Pop": "Fast-paced rounds to build a mega star streak!",
-    "🧩 Brainy Pattern & Logic": "Solve patterns, riddles, and brain teasers!"
+    "🎈 Adventure Mode": ("🎈 Explorer Mission", "Relaxed learning with fun facts."),
+    "⚡ Lightning Pop": ("⚡ Warp Speed", f"Answer within {WARP_WINDOW_SEC}s for a bonus star."),
+    "🧩 Brainy Pattern & Logic": ("🧩 Logic Core", "Patterns, rhymes and brain teasers."),
+}
+LEVEL_NAMES = {
+    1: "🌱 Level 1 · Rookie Orbit (Age 3)",
+    2: "🐥 Level 2 · Star Scout (Age 4)",
+    3: "🦊 Level 3 · Deep Space Pilot (Age 5)",
+    4: "🚀 Level 4 · Galaxy Captain (Age 6)",
 }
 
+# ==========================================
+# 4. VOICE + SYNTH SFX ENGINE (respects the Sound toggle)
+# ==========================================
+SPEAK_JS = """
+<script>
+(function(){
+  const msg = __MSG__;
+  const sfx = __SFX__;
+  try {
+    const AC = window.AudioContext || window.webkitAudioContext;
+    if (AC) {
+      const ctx = new AC();
+      const tone = (f, s, d, w='sine', v=0.2) => {
+        const o = ctx.createOscillator(), g = ctx.createGain();
+        o.type = w; o.frequency.setValueAtTime(f, ctx.currentTime + s);
+        g.gain.setValueAtTime(v, ctx.currentTime + s);
+        g.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + s + d);
+        o.connect(g); g.connect(ctx.destination);
+        o.start(ctx.currentTime + s); o.stop(ctx.currentTime + s + d);
+      };
+      const sweep = (f1, f2, s, d) => {
+        const o = ctx.createOscillator(), g = ctx.createGain();
+        o.type = 'sawtooth'; o.frequency.setValueAtTime(f1, ctx.currentTime + s);
+        o.frequency.exponentialRampToValueAtTime(f2, ctx.currentTime + s + d);
+        g.gain.setValueAtTime(0.07, ctx.currentTime + s);
+        g.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + s + d);
+        o.connect(g); g.connect(ctx.destination);
+        o.start(ctx.currentTime + s); o.stop(ctx.currentTime + s + d);
+      };
+      if (sfx === 'win')   { [587.33, 739.99, 880, 1174.66].forEach((f,i)=>tone(f, i*0.1, i===3?0.35:0.12)); }
+      if (sfx === 'oops')  { tone(392, 0, 0.16, 'triangle'); tone(349.23, 0.16, 0.24, 'triangle'); }
+      if (sfx === 'pop')   { tone(880, 0, 0.08); tone(1046.5, 0.07, 0.10); }
+      if (sfx === 'scan')  { sweep(300, 1500, 0, 0.55); tone(1500, 0.55, 0.12, 'sine', 0.15); }
+      if (sfx === 'boot')  { [262,330,392,523,659].forEach((f,i)=>tone(f, i*0.09, 0.14, 'square', 0.07)); }
+      if (sfx === 'level') { [523,659,784,1047,1319,1568].forEach((f,i)=>tone(f, i*0.1, 0.22, 'triangle', 0.2)); }
+    }
+  } catch(e) {}
+  if (msg && 'speechSynthesis' in window) {
+    window.speechSynthesis.cancel();
+    const u = new SpeechSynthesisUtterance(msg);
+    const voices = window.speechSynthesis.getVoices();
+    const v = voices.find(x => /Google UK English Female|Google US English|Samantha|Victoria|Zira|Tessa|Karen/i.test(x.name));
+    if (v) u.voice = v;
+    u.pitch = 1.5; u.rate = 1.08; u.volume = 1.0;
+    window.speechSynthesis.speak(u);
+  }
+})();
+</script>
+<div style="display:none">__TID__</div>
+"""
+
+
+def speak(text: str, sfx: str = "none", trigger_id: str = "0"):
+    if not st.session_state.get("sound_on", True):
+        return
+    js = (SPEAK_JS.replace("__MSG__", json.dumps(text))
+                  .replace("__SFX__", json.dumps(sfx))
+                  .replace("__TID__", escape(str(trigger_id))))
+    components.html(js, height=0)
+
+
+# ==========================================
+# 5. INTERACTIVE OBJECT SCANNER (tap-to-count, pitch rises with each tap)
+# ==========================================
+SCANNER_HTML = """
+<!-- __QID__ -->
+<div style="text-align:center;font-family:'Exo 2',sans-serif;color:#E6F0FF;padding:4px">
+  <div style="font-size:1.05rem;font-weight:700;color:#9FB3D6;margin-bottom:10px">📡 Tap each object to scan it</div>
+  <div id="box" style="display:flex;flex-wrap:wrap;justify-content:center;gap:12px"></div>
+  <div id="out" style="margin-top:10px;font-size:1.35rem;font-weight:700;color:#FBBF24;min-height:30px"></div>
+</div>
+<script>
+  const items = __ITEMS__;
+  const sound = __SOUND__;
+  const box = document.getElementById('box'), out = document.getElementById('out');
+  let n = 0, ctx = null;
+  const beep = (f) => {
+    try {
+      ctx = ctx || new (window.AudioContext || window.webkitAudioContext)();
+      const o = ctx.createOscillator(), g = ctx.createGain();
+      o.type = 'sine'; o.frequency.value = f;
+      g.gain.setValueAtTime(0.2, ctx.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.18);
+      o.connect(g); g.connect(ctx.destination); o.start(); o.stop(ctx.currentTime + 0.2);
+    } catch(e) {}
+  };
+  items.forEach((it) => {
+    const b = document.createElement('button');
+    b.textContent = it;
+    b.style.cssText = "font-size:2.6rem;padding:8px 16px;border-radius:16px;cursor:pointer;color:#fff;" +
+      "background:rgba(34,211,238,.08);border:1px solid rgba(34,211,238,.45);transition:all .15s";
+    b.onmouseenter = () => { if (!b.dataset.t) b.style.boxShadow = "0 0 18px rgba(34,211,238,.5)"; };
+    b.onmouseleave = () => { if (!b.dataset.t) b.style.boxShadow = "none"; };
+    b.onclick = () => {
+      if (b.dataset.t) return;
+      b.dataset.t = "1"; n++;
+      b.style.background = "rgba(52,211,153,.2)";
+      b.style.borderColor = "#34D399";
+      b.style.boxShadow = "0 0 20px rgba(52,211,153,.6)";
+      b.style.transform = "scale(1.12)";
+      out.textContent = "🛰️ Objects scanned: " + n;
+      if (sound) {
+        beep(440 * Math.pow(2, n / 6));
+        if ('speechSynthesis' in window) {
+          window.speechSynthesis.cancel();
+          const u = new SpeechSynthesisUtterance(String(n));
+          u.pitch = 1.6; u.rate = 1.15; window.speechSynthesis.speak(u);
+        }
+      }
+    };
+    box.appendChild(b);
+  });
+</script>
+"""
+
+
+def render_scanner(items, qid):
+    html_widget = (SCANNER_HTML.replace("__ITEMS__", json.dumps(items))
+                               .replace("__SOUND__", "true" if st.session_state.get("sound_on", True) else "false")
+                               .replace("__QID__", str(qid)))
+    components.html(html_widget, height=210)
+
+
+TIMER_HTML = """
+<!-- __QID__ -->
+<div style="font-family:'Exo 2',sans-serif;color:#E6F0FF">
+  <div id="lab" style="font-weight:700;margin-bottom:6px">⚡ Warp bonus window: <span id="t" style="color:#FBBF24">__SEC__</span>s</div>
+  <div style="height:12px;border-radius:99px;background:rgba(148,169,204,.2);overflow:hidden">
+    <div id="b" style="height:100%;width:100%;background:linear-gradient(90deg,#22D3EE,#FBBF24);transition:width __SEC__s linear"></div>
+  </div>
+</div>
+<script>
+  let t = __SEC__;
+  const lab = document.getElementById('lab'), el = document.getElementById('t'), bar = document.getElementById('b');
+  requestAnimationFrame(() => requestAnimationFrame(() => { bar.style.width = '0%'; }));
+  const iv = setInterval(() => {
+    t--; el.textContent = t;
+    if (t <= 0) { clearInterval(iv); lab.textContent = '⏱ Bonus window closed — you can still earn a star!'; }
+  }, 1000);
+</script>
+"""
+
+
+def render_warp_timer(qid):
+    components.html(TIMER_HTML.replace("__SEC__", str(WARP_WINDOW_SEC)).replace("__QID__", str(qid)), height=58)
+
+
+# ==========================================
+# 6. EXERCISE BANK (always 4 options; answer is guaranteed to be among them)
+# ==========================================
 def generate_question(subject: str, level: int, mode: str):
     if subject == "🔢 Math Kingdom":
         if mode == "🧩 Brainy Pattern & Logic":
@@ -577,7 +639,7 @@ def generate_question(subject: str, level: int, mode: str):
                 ("5️⃣ ➔ 10 ➔ 15 ➔ ❓", "Count by 5s! High five! What number is next?", "20 Twenty", ["16 Sixteen", "20 Twenty", "18 Eighteen", "25 Twenty-Five"],
                  "You have 5 fingers on each hand—two hands make 10, and four hands make 20!", []),
                 ("10 ➔ 9 ➔ 8 ➔ ❓", "Rocket countdown! Which number blasts off next?", "7️⃣ Seven", ["6️⃣ Six", "7️⃣ Seven", "9️⃣ Nine", "5️⃣ Five"],
-                 "Astronauts count backward to zero before launching rockets into space!", [])
+                 "Astronauts count backward to zero before launching rockets into space!", []),
             ]
             vis, q, ans, opts, fact, toys = random.choice(patterns)
             return {"visual": vis, "question": q, "answer": ans, "options": opts, "fact": fact,
@@ -593,11 +655,10 @@ def generate_question(subject: str, level: int, mode: str):
             return {
                 "visual": " ".join([emoji] * n),
                 "question": f"Tap and count! How many {emoji} are here?",
-                "answer": str(n),
-                "options": opts,
+                "answer": str(n), "options": opts,
                 "fact": f"Super counting! {n} is one of our magic counting numbers!",
                 "voice": f"Yay! Tap each picture to count! How many {emoji} do you see?",
-                "toys": [emoji] * n
+                "toys": [emoji] * n,
             }
 
         elif level == 2:
@@ -609,12 +670,11 @@ def generate_question(subject: str, level: int, mode: str):
                 random.shuffle(opts)
                 return {
                     "visual": " ".join([emoji] * n),
-                    "question": f"Big counting challenge! How many {emoji} are swimming?",
-                    "answer": str(n),
-                    "options": opts,
+                    "question": f"Big counting challenge! How many {emoji} can you find?",
+                    "answer": str(n), "options": opts,
                     "fact": f"Awesome! Counting all the way to {n} makes your math brain super strong!",
                     "voice": f"Whoa, look at all those {emoji}! Can you count how many there are?",
-                    "toys": [emoji] * n
+                    "toys": [emoji] * n,
                 }
             else:
                 a, b = random.sample(range(2, 9), 2)
@@ -624,11 +684,10 @@ def generate_question(subject: str, level: int, mode: str):
                 return {
                     "visual": f"Basket A: {'🍓'*a}   🆚   Basket B: {'🍊'*b}",
                     "question": "Which basket has MORE yummy fruit?",
-                    "answer": ans,
-                    "options": opts,
+                    "answer": ans, "options": opts,
                     "fact": "Comparing groups helps us tell which pile is bigger or smaller!",
                     "voice": "Yum! Look at the two fruit baskets! Which basket has more fruit?",
-                    "toys": []
+                    "toys": [],
                 }
 
         elif level == 3:
@@ -640,11 +699,10 @@ def generate_question(subject: str, level: int, mode: str):
             return {
                 "visual": f"{'🦖'*a}  ➕  {'🦖'*b}",
                 "question": f"{a} dinosaurs meet {b} more dinosaurs! How many altogether?",
-                "answer": str(ans),
-                "options": opts,
+                "answer": str(ans), "options": opts,
                 "fact": f"{a} + {b} = {ans}! Putting two groups together is called ADDITION!",
                 "voice": f"Roar! {a} friendly dinosaurs meet {b} more dinosaurs! How many dinosaurs altogether?",
-                "toys": ["🦖"] * (a + b)
+                "toys": ["🦖"] * (a + b),
             }
 
         else:
@@ -659,28 +717,26 @@ def generate_question(subject: str, level: int, mode: str):
                 return {
                     "visual": f"{'🎈'*a}  ➖  ({b} popped!)",
                     "question": f"You had {a} party balloons and {b} popped! How many are left?",
-                    "answer": str(ans),
-                    "options": opts,
+                    "answer": str(ans), "options": opts,
                     "fact": f"{a} take away {b} equals {ans}! That's subtraction in action!",
                     "voice": f"Pop pop! You had {a} party balloons and {b} floated away! How many are left?",
-                    "toys": []
+                    "toys": [],
                 }
             elif q_type == "time":
                 clocks = [
                     ("🕒", "3:00 (3 O'Clock)", ["3:00 (3 O'Clock)", "6:00 (6 O'Clock)", "12:00 (12 O'Clock)", "9:00 (9 O'Clock)"]),
                     ("🕕", "6:00 (6 O'Clock)", ["6:00 (6 O'Clock)", "3:00 (3 O'Clock)", "1:00 (1 O'Clock)", "10:00 (10 O'Clock)"]),
-                    ("🕘", "9:00 (9 O'Clock)", ["9:00 (9 O'Clock)", "3:00 (3 O'Clock)", "6:00 (6 O'Clock)", "12:00 (12 O'Clock)"])
+                    ("🕘", "9:00 (9 O'Clock)", ["9:00 (9 O'Clock)", "3:00 (3 O'Clock)", "6:00 (6 O'Clock)", "12:00 (12 O'Clock)"]),
                 ]
                 clk, ans, opts = random.choice(clocks)
                 random.shuffle(opts)
                 return {
                     "visual": f"⏰  {clk}  ⏰",
                     "question": "Look at the clock hands! What time is it?",
-                    "answer": ans,
-                    "options": opts,
+                    "answer": ans, "options": opts,
                     "fact": "The short hand points to the hour, and when the long hand points straight up to 12, it's O'Clock!",
                     "voice": "Tick tock! Look at the clock! What time does it show?",
-                    "toys": []
+                    "toys": [],
                 }
             else:
                 total = random.randint(7, 10)
@@ -692,11 +748,10 @@ def generate_question(subject: str, level: int, mode: str):
                 return {
                     "visual": f"{part}  ➕  ❓  =  {total}",
                     "question": f"Mystery number! {part} plus WHAT equals {total}?",
-                    "answer": str(missing),
-                    "options": opts,
+                    "answer": str(missing), "options": opts,
                     "fact": f"{part} + {missing} = {total}! You solved an algebra mystery like a real mathematician!",
                     "voice": f"Detective math! {part} plus what secret number equals {total}?",
-                    "toys": []
+                    "toys": [],
                 }
 
     elif subject == "🔤 Alphabet Jungle":
@@ -707,7 +762,7 @@ def generate_question(subject: str, level: int, mode: str):
                 ("A ➔ B ➔ C ➔ ❓", "Sing the ABC song! Which letter marches next?", "🇩 D", ["🇩 D", "🇫 F", "🇿 Z", "🇲 M"],
                  "There are 26 letters in the English alphabet, and every book is written with them!"),
                 ("🐸  🪵  🐶", "Which word RHYMES with FROG?", "🪵 LOG", ["🪵 LOG", "🚗 CAR", "🍎 APPLE", "🌙 MOON"],
-                 "Frog and log both end with the 'OG' sound!")
+                 "Frog and log both end with the 'OG' sound!"),
             ]
             vis, q, ans, opts, fact = random.choice(riddles)
             return {"visual": vis, "question": q, "answer": ans, "options": opts, "fact": fact,
@@ -720,7 +775,7 @@ def generate_question(subject: str, level: int, mode: str):
                 ("🍎", "Crunch! What letter does APPLE start with?", "A", ["A", "P", "T", "D"],
                  "Apples float in water because they are 25% air inside!"),
                 ("🐸", "Ribbit! What letter does FROG start with?", "F", ["F", "G", "R", "K"],
-                 "Frogs drink water right through their skin—no cup needed!")
+                 "Frogs drink water right through their skin—no cup needed!"),
             ],
             2: [
                 ("🐘", "Stomp stomp! Which animal starts with the 'Eh' sound (Letter E)?", "🐘 Elephant", ["🐘 Elephant", "🐯 Tiger", "🐵 Monkey", "🐻 Bear"],
@@ -728,7 +783,7 @@ def generate_question(subject: str, level: int, mode: str):
                 ("🚀", "Zoom! Which picture starts with the 'Rrr' sound (Letter R)?", "🚀 Rocket", ["🚀 Rocket", "⛵ Boat", "🚲 Bike", "🚂 Train"],
                  "Rockets travel faster than 17,000 miles per hour to reach space!"),
                 ("🐢", "Which slow-and-steady friend starts with the letter T?", "🐢 Turtle", ["🐢 Turtle", "🦆 Duck", "🐷 Pig", "🐝 Bee"],
-                 "Turtles carry their cozy shell homes right on their backs!")
+                 "Turtles carry their cozy shell homes right on their backs!"),
             ],
             3: [
                 ("☀️  _ U N", "Spell the bright yellow star in the sky! Missing letter?", "S (SUN)", ["S (SUN)", "B (BUN)", "R (RUN)", "F (FUN)"],
@@ -736,7 +791,7 @@ def generate_question(subject: str, level: int, mode: str):
                 ("🐱  _ A T", "Meow! Which letter completes the word _ A T?", "C (CAT)", ["C (CAT)", "D (DAT)", "P (PAT)", "M (MAT)"],
                  "Cats use their whiskers to measure if they can squeeze through tight spaces!"),
                 ("🐷  P _ G", "Oink oink! Which vowel goes in the middle of P _ G?", "I (PIG)", ["I (PIG)", "A (PAG)", "O (POG)", "E (PEG)"],
-                 "A, E, I, O, U are the 5 superstar vowels—almost every word needs one!")
+                 "A, E, I, O, U are the 5 superstar vowels—almost every word needs one!"),
             ],
             4: [
                 ("🦈  🚢  🐑", "Which sound do SHARK, SHIP, and SHEEP all start with?", "SH", ["SH", "CH", "TH", "ST"],
@@ -746,13 +801,13 @@ def generate_question(subject: str, level: int, mode: str):
                 ("🍎 ➔ 🍎🍎🍎", "One apple, many ______! How do we spell more than one apple?", "Apples", ["Apples", "Apple", "Appling", "Appled"],
                  "Adding the letter 'S' to the end of most words turns ONE into MANY!"),
                 ("📚", "Which word is an ACTION word (verb)?", "🏃 JUMP", ["🏃 JUMP", "🪑 CHAIR", "🔵 BLUE", "🍎 APPLE"],
-                 "Action words tell us what someone or something is doing!")
-            ]
+                 "Action words tell us what someone or something is doing!"),
+            ],
         }
         vis, q, ans, opts, fact = random.choice(bank[level])
         random.shuffle(opts)
         return {"visual": vis, "question": q, "answer": ans, "options": opts, "fact": fact,
-                "voice": f"Welcome to Alphabet Jungle! {q}", "toys": []}
+                "voice": f"Welcome to Letter Galaxy! {q}", "toys": []}
 
     elif subject == "🔬 Discovery Lab":
         science_bank = {
@@ -762,13 +817,13 @@ def generate_question(subject: str, level: int, mode: str):
                 ("🌧️  ☀️", "When sunshine shines through raindrops, what appears in the sky?", "🌈 Rainbow", ["🌈 Rainbow", "⛄ Snowman", "🌙 Moon", "🪨 Rock"],
                  "Sunlight is made of 7 rainbow colors hiding together inside white light!"),
                 ("👃  🌸", "Which part of your body do you use to smell a yummy flower?", "👃 Nose", ["👃 Nose", "👂 Ear", "👀 Eyes", "🦶 Foot"],
-                 "Your nose can recognize thousands of different smells—like cookies baking!")
+                 "Your nose can recognize thousands of different smells—like cookies baking!"),
             ],
             2: [
                 ("🐛  ➔  💤  ➔  ❓", "A hungry caterpillar sleeps in a chrysalis and wakes up as a...", "🦋 Butterfly", ["🦋 Butterfly", "🐸 Frog", "🐟 Fish", "🐦 Bird"],
                  "Butterflies taste flowers using tiny sensors on their FEET!"),
                 ("🌱  ☀️  💧", "What does a tiny seed need to grow into a tall flower?", "☀️ Sun & Water", ["☀️ Sun & Water", "🍕 Pizza", "🧸 Teddy Bear", "❄️ Ice Cubes"],
-                 "Plants drink water through their roots like straws and make food from sunshine!")
+                 "Plants drink water through their roots like straws and make food from sunshine!"),
             ],
             3: [
                 ("🪐  🌍  ☀️", "Which planet do WE live on?", "🌍 Earth", ["🌍 Earth", "🪐 Saturn", "🔴 Mars", "☀️ The Sun"],
@@ -776,7 +831,7 @@ def generate_question(subject: str, level: int, mode: str):
                 ("🧲  📎", "Which object will stick to a super magnet?", "📎 Metal Paperclip", ["📎 Metal Paperclip", "🍌 Banana", "🧸 Plush Toy", "🖍️ Crayon"],
                  "Magnets have invisible force fields that pull on iron and steel!"),
                 ("🐧  ❄️", "Where does a fluffy penguin live?", "❄️ Icy Antarctica", ["❄️ Icy Antarctica", "🌵 Hot Desert", "🌴 Tropical Jungle", "🌋 Volcano"],
-                 "Penguins have thick waterproof feathers that keep them cozy in freezing water!")
+                 "Penguins have thick waterproof feathers that keep them cozy in freezing water!"),
             ],
             4: [
                 ("🧊  🔥  💧", "When warm sunshine heats up an ice cube, it melts into...", "💧 Liquid Water", ["💧 Liquid Water", "🪨 Solid Rock", "🪵 Wood", "🏖️ Sand"],
@@ -786,8 +841,8 @@ def generate_question(subject: str, level: int, mode: str):
                 ("🫀  💓", "Which muscle inside your chest pumps blood all around your body?", "❤️ Your Heart", ["❤️ Your Heart", "🧠 Your Brain", "🦴 Your Bones", "💪 Your Biceps"],
                  "Your heart is about the size of your fist and beats around 100,000 times every single day!"),
                 ("🦕  🦴", "Animals like T-Rex that lived millions of years ago and are no longer alive are...", "🦖 Extinct", ["🦖 Extinct", "Hibernating", "Nocturnal", "Amphibians"],
-                 "Scientists called paleontologists dig up dinosaur fossils to learn how they lived!")
-            ]
+                 "Scientists called paleontologists dig up dinosaur fossils to learn how they lived!"),
+            ],
         }
         vis, q, ans, opts, fact = random.choice(science_bank[level])
         random.shuffle(opts)
@@ -800,7 +855,7 @@ def generate_question(subject: str, level: int, mode: str):
                 ("🍕  📐", "How many pointy corners does a TRIANGLE have?", "3 Corners", ["3 Corners", "4 Corners", "0 Corners", "5 Corners"],
                  "Tri means THREE! Tricycles have 3 wheels and triangles have 3 sides!"),
                 ("🌕  ⚽  🍪", "Which shape is completely round with ZERO corners?", "⭕ Circle", ["⭕ Circle", "⬛ Square", "🔺 Triangle", "⭐ Star"],
-                 "Wheels are circles because round shapes roll smoothly without bumping!")
+                 "Wheels are circles because round shapes roll smoothly without bumping!"),
             ],
             2: [
                 ("🔴  ➕  🟡  =  ❓", "Mix RED paint and YELLOW paint together! What magic color do you get?", "🟠 Orange", ["🟠 Orange", "🟢 Green", "🟣 Purple", "🔵 Blue"],
@@ -808,13 +863,13 @@ def generate_question(subject: str, level: int, mode: str):
                 ("🔵  ➕  🟡  =  ❓", "Swirl BLUE and YELLOW paint together! Which color appears?", "🟢 Green", ["🟢 Green", "🟠 Orange", "🟣 Purple", "🩷 Pink"],
                  "Leaves look green because of chlorophyll, which catches sunlight for trees!"),
                 ("🔴  ➕  🔵  =  ❓", "Mix RED and BLUE paint! Which royal color pops out?", "🟣 Purple", ["🟣 Purple", "🟢 Green", "🟠 Orange", "🟡 Yellow"],
-                 "Purple was once so rare that only kings and queens could wear purple clothes!")
+                 "Purple was once so rare that only kings and queens could wear purple clothes!"),
             ],
             3: [
                 ("🐝  🍯", "What 6-sided shape do busy bees build inside their honeycomb?", "⬡ Hexagon", ["⬡ Hexagon", "⭕ Circle", "🔺 Triangle", "⬛ Square"],
                  "Hexagons fit together with zero wasted space—bees are tiny math geniuses!"),
                 ("🛑", "How many sides does a red STOP sign (Octagon) have?", "8 Sides", ["8 Sides", "6 Sides", "4 Sides", "3 Sides"],
-                 "Octo means EIGHT—just like an octopus with 8 arms and an octagon with 8 sides!")
+                 "Octo means EIGHT—just like an octopus with 8 arms and an octagon with 8 sides!"),
             ],
             4: [
                 ("🎲  📦", "A 3D square box shape with 6 flat faces is called a...", "🧊 Cube", ["🧊 Cube", "⚽ Sphere", "🍦 Cone", "🥫 Cylinder"],
@@ -822,370 +877,470 @@ def generate_question(subject: str, level: int, mode: str):
                 ("🍦  🎉", "A party hat and an ice cream waffle share which 3D shape?", "🔺 Cone", ["🔺 Cone", "🧊 Cube", "⚽ Sphere", "📦 Box"],
                  "Cones have a round circle on one end and a sharp point on the other!"),
                 ("🍕  ✂️  🍕", "If you cut 1 whole pizza into 2 EQUAL slices, each slice is called...", "½ One Half", ["½ One Half", "¼ One Quarter", "2 Wholes", "Zero"],
-                 "Halves must be the exact same size so everyone gets a fair share!")
-            ]
+                 "Halves must be the exact same size so everyone gets a fair share!"),
+            ],
         }
         vis, q, ans, opts, fact = random.choice(shape_bank[level])
         random.shuffle(opts)
         return {"visual": vis, "question": q, "answer": ans, "options": opts, "fact": fact,
                 "voice": f"Ahoy, explorer! {q}", "toys": []}
 
-# ==========================================
-# 6. SESSION STATE INITIALIZATION
-# ==========================================
-if "user_id" not in st.session_state:
-    st.session_state.user_id = None
-if "subject" not in st.session_state:
-    st.session_state.subject = "🔢 Math Kingdom"
-if "mode" not in st.session_state:
-    st.session_state.mode = "🎈 Adventure Mode"
-if "level" not in st.session_state:
-    st.session_state.level = 1
-if "current_q" not in st.session_state:
-    st.session_state.current_q = None
-if "answered" not in st.session_state:
-    st.session_state.answered = False
-if "last_result" not in st.session_state:
-    st.session_state.last_result = None
-if "new_sticker" not in st.session_state:
-    st.session_state.new_sticker = None
-if "speech_payload" not in st.session_state:
-    st.session_state.speech_payload = None
+
+def finalize_question(q: dict) -> dict:
+    """Guarantee: unique options, answer present, exactly 4 choices."""
+    seen, opts = set(), []
+    for o in q["options"]:
+        if o not in seen:
+            seen.add(o)
+            opts.append(o)
+    if q["answer"] not in opts:
+        opts[random.randrange(len(opts))] = q["answer"]
+    others = [o for o in opts if o != q["answer"]]
+    random.shuffle(others)
+    opts = (others[:3] + [q["answer"]])
+    while len(opts) < 4:                       # pad (very rare) so the 2x2 grid never breaks
+        opts.insert(0, f"✨ Mystery {len(opts)}")
+    random.shuffle(opts)
+    q["options"] = opts
+    return q
+
+
+def make_question(subject, level, mode, avoid_text=None):
+    q = None
+    for _ in range(6):                         # avoid showing the same question twice in a row
+        q = finalize_question(generate_question(subject, level, mode))
+        if q["question"] != avoid_text:
+            break
+    return q
 
 # ==========================================
-# 7. SYMMETRICAL LOGIN & SIGN-UP GATEWAY
+# 7. SESSION STATE
+# ==========================================
+DEFAULTS = {
+    "user_id": None, "subject": "🔢 Math Kingdom", "mode": "🎈 Adventure Mode", "level": 1,
+    "current_q": None, "q_id": 0, "q_start": 0.0, "answered": False, "last_result": None,
+    "chosen": None, "eliminated": [], "hint_used": False, "mission_results": [],
+    "result_info": None, "rank_up": None, "speech_payload": None, "sound_on": True,
+}
+for k, v in DEFAULTS.items():
+    if k not in st.session_state:
+        st.session_state[k] = v
+
+
+def start_question(announce=True):
+    s = st.session_state
+    prev = (s.current_q or {}).get("question")
+    s.current_q = make_question(s.subject, s.level, s.mode, prev)
+    s.q_id = time.time_ns()
+    s.q_start = time.time()
+    s.answered, s.last_result, s.chosen = False, None, None
+    s.eliminated, s.hint_used, s.result_info, s.rank_up = [], False, None, None
+    if announce:
+        s.speech_payload = (s.current_q["voice"], "pop", str(s.q_id))
+
+
+def begin_session(user, greeting):
+    s = st.session_state
+    s.user_id = user["id"]
+    s.level = max(1, min(4, user["age_group"] - 2))
+    s.mission_results = []
+    start_question(announce=False)
+    s.speech_payload = (greeting, "boot", str(random.random()))
+
+
+# ==========================================
+# 8. CREW CHECK-IN (LOGIN / SIGN-UP)
 # ==========================================
 if st.session_state.user_id is None:
-    st.markdown("""
-    <div class="rainbow-banner">
-      <div class="banner-inner">
-        <div style="font-size:3.2rem; margin-bottom:6px;">🦁 🦄 🦖 🚀 🌈</div>
-        <h1 style="font-size:3rem; color:#0F172A; margin:0;">WonderKids Academy</h1>
-        <p style="font-size:1.3rem; color:#334155; margin:8px 0 14px 0;">
-            High-Contrast Cartoon Learning World for Little Explorers (Ages 3 – 6)
-        </p>
-        <span class="badge-pill">🔢 Math Kingdom</span>
-        <span class="badge-pill">🔤 Alphabet Jungle</span>
-        <span class="badge-pill">🔬 Discovery Lab</span>
-        <span class="badge-pill">🎨 Shape & Color Island</span>
+    ui("""
+    <div class="panel hero">
+      <div class="hero-main">
+        <div class="hero-title">WonderKids Academy</div>
+        <div class="hero-sub">Mission Control for little explorers, ages 3 to 6. Learn, scan, level up.</div>
+        <span class="chip">🔢 Number Nebula</span><span class="chip">🔤 Letter Galaxy</span>
+        <span class="chip">🔬 Science Station</span><span class="chip">🎨 Shape &amp; Color Moon</span>
+      </div>
+      <div class="boot">
+        <div class="boot-line" style="--d:.2s">▸ Waking the academy core … <b>ok</b></div>
+        <div class="boot-line" style="--d:.9s">▸ Calibrating star maps … <b>ok</b></div>
+        <div class="boot-line" style="--d:1.6s">▸ Loading NOVA, the ship AI … <b>ok</b></div>
+        <div class="boot-line" style="--d:2.3s">▸ Crew check-in ready <b>▮</b></div>
       </div>
     </div>
-    """, unsafe_allow_html=True)
+    """)
 
     col_left, col_right = st.columns(2, gap="large")
 
     with col_left:
-        st.markdown("""
-        <div class="auth-card">
-            <h3 style="margin:0; text-align:center; color:#0369A1;">🔑 Returning Explorer Log In</h3>
-        </div>
-        """, unsafe_allow_html=True)
+        ui('<div class="panel"><h3>🔑 Crew check-in</h3><div class="tiny">Returning explorers sign in here.</div></div>')
         with st.form("login_form"):
-            login_user = st.text_input("Explorer Username", placeholder="e.g., leo_dino")
-            login_pw = st.text_input("Secret Passcode", type="password", placeholder="••••••")
-            st.write("")
-            submitted_login = st.form_submit_button("🚀 Jump Into the Playground!")
+            login_user = st.text_input("Explorer username", placeholder="e.g., leo_dino")
+            login_pw = st.text_input("Secret passcode", type="password", placeholder="••••••")
+            submitted_login = st.form_submit_button("🚀 Launch")
             if submitted_login:
                 user = authenticate_user(login_user, login_pw)
                 if user:
-                    st.session_state.user_id = user["id"]
-                    st.session_state.level = max(1, min(4, user["age_group"] - 2))
-                    st.session_state.current_q = generate_question(st.session_state.subject, st.session_state.level, st.session_state.mode)
-                    st.session_state.speech_payload = (
-                        f"Yay! Welcome back {user['child_name']}! Let's play and collect super stars!",
-                        "win",
-                        str(random.random())
-                    )
+                    begin_session(user, f"Welcome back, {user['child_name']}! Mission control is ready. Let's collect stars!")
                     st.rerun()
                 else:
-                    st.error("Oopsie! Check your username or secret passcode and try again.")
+                    st.error("Check-in failed: that username and passcode don't match. Check both and try again.")
 
     with col_right:
-        st.markdown("""
-        <div class="auth-card">
-            <h3 style="margin:0; text-align:center; color:#15803D;">✨ New Explorer Sign Up</h3>
-        </div>
-        """, unsafe_allow_html=True)
+        ui('<div class="panel"><h3>✨ Enlist a new cadet</h3><div class="tiny">Takes ten seconds. No email needed.</div></div>')
         with st.form("signup_form"):
-            new_child = st.text_input("Child's First Name", placeholder="e.g., Maya")
-            new_user = st.text_input("Choose a Fun Username", placeholder="e.g., maya_star")
-            new_pw = st.text_input("Create a Secret Passcode", type="password", placeholder="e.g., 1234")
-            r_c1, r_c2 = st.columns(2)
-            with r_c1:
-                age = st.selectbox("Child's Age", [3, 4, 5, 6], format_func=lambda a: f"🎂 {a} Years Old")
-            with r_c2:
-                avatar = st.selectbox("Cartoon Buddy", ["🦁 Leo", "🦄 Sparkle", "🦖 Rexy", "🐼 Bamboo", "🚀 Astro"])
-            submitted_signup = st.form_submit_button("🎉 Create My Profile & Play!")
+            new_child = st.text_input("Child's first name", placeholder="e.g., Maya")
+            new_user = st.text_input("Choose an explorer username", placeholder="e.g., maya_star")
+            new_pw = st.text_input("Create a secret passcode", type="password", placeholder="e.g., 1234")
+            r1, r2 = st.columns(2)
+            with r1:
+                age = st.selectbox("Child's age", [3, 4, 5, 6], format_func=lambda a: f"🎂 {a} years old")
+            with r2:
+                avatar = st.selectbox("Crew buddy", ["🦁 Leo", "🦄 Sparkle", "🦖 Rexy", "🐼 Bamboo", "🚀 Astro"])
+            submitted_signup = st.form_submit_button("🎉 Enlist & launch")
             if submitted_signup:
-                if not new_child or not new_user or not new_pw:
-                    st.warning("Please fill in your name, username, and passcode!")
+                if not new_child.strip() or not new_user.strip() or not new_pw:
+                    st.warning("Enter the child's name, a username and a passcode to continue.")
                 else:
                     ok, msg = create_user(new_user, new_pw, new_child, age, avatar.split()[0])
                     if ok:
                         user = authenticate_user(new_user, new_pw)
-                        st.session_state.user_id = user["id"]
-                        st.session_state.level = max(1, min(4, age - 2))
-                        st.session_state.current_q = generate_question(st.session_state.subject, st.session_state.level, st.session_state.mode)
-                        st.session_state.speech_payload = (
-                            f"Hooray! Hi {new_child}! Welcome to WonderKids Academy! Let's have super fun!",
-                            "win",
-                            str(random.random())
-                        )
+                        begin_session(user, f"Hooray! Hi {new_child}! You are now a cadet at WonderKids Academy. Let's blast off!")
                         st.rerun()
                     else:
                         st.error(msg)
+    if st.session_state.speech_payload:
+        st.session_state.speech_payload = None
     st.stop()
 
 # ==========================================
-# 8. AUTHENTICATED APP SHELL & SIDEBAR
+# 9. APP SHELL & SIDEBAR
 # ==========================================
 user = get_user_by_id(st.session_state.user_id)
+if user is None:                                   # account vanished — return to check-in
+    st.session_state.user_id = None
+    st.rerun()
+
+rk = rank_info(user["stars"])
+safe_name = escape(user["child_name"])
 
 with st.sidebar:
-    st.markdown(f"""
-    <div style="background:#FEF9C3; padding:16px; border-radius:22px; border:3px solid #D97706; text-align:center; box-shadow:0 5px 0 #B45309; margin-bottom:14px;">
-        <div style="font-size:3.2rem;">{user['avatar']}</div>
-        <h3 style="margin:4px 0; color:#0F172A;">{user['child_name']} • Age {user['age_group']}</h3>
-        <div style="font-size:1.15rem; font-weight:700; color:#0369A1;">⭐ {user['stars']} Stars  |  🔥 {user['streak']} Streak</div>
+    nxt_txt = (f"{rk['to_go']} ⭐ to {rk['next'][1]}" if rk["next"] else "Top rank reached")
+    ui(f"""
+    <div class="crew">
+      <div class="orbit"><span>{user['avatar']}</span></div>
+      <div class="crew-name">{safe_name} · Age {user['age_group']}</div>
+      <div class="rank">{rk['icon']} {rk['name']}</div>
+      <div class="bar"><div style="width:{rk['pct']}%"></div></div>
+      <div class="tiny">{nxt_txt}</div>
+      <div style="margin-top:8px;font-weight:700">⭐ {user['stars']} &nbsp;·&nbsp; 🔥 {user['streak']}</div>
     </div>
-    """, unsafe_allow_html=True)
+    """)
 
-    st.markdown("### 🧭 Playground Map")
+    st.markdown("### 🧭 Navigation")
     nav_choice = st.radio(
-        "Go to:",
-        ["🎮 Play Learning Games", "🏆 My Sticker Book", "📊 Parent Progress Report"],
-        label_visibility="collapsed"
+        "Go to",
+        ["🎮 Mission Deck", "🏆 Artifact Vault", "📊 Command Analytics"],
+        label_visibility="collapsed",
     )
 
-    st.markdown("### 🌍 Learning World")
+    st.markdown("### 🌌 Sector")
     selected_subject = st.selectbox(
-        "World",
-        ["🔢 Math Kingdom", "🔤 Alphabet Jungle", "🔬 Discovery Lab", "🎨 Shape & Color Island"],
-        index=["🔢 Math Kingdom", "🔤 Alphabet Jungle", "🔬 Discovery Lab", "🎨 Shape & Color Island"].index(st.session_state.subject)
+        "Sector", list(SECTOR_NAMES.keys()), format_func=lambda k: SECTOR_NAMES[k],
+        index=list(SECTOR_NAMES.keys()).index(st.session_state.subject), label_visibility="collapsed",
     )
-
-    st.markdown("### 🎯 Game Mode")
+    st.markdown("### 🎯 Mission type")
     selected_mode = st.selectbox(
-        "Mode",
-        list(MODES.keys()),
-        index=list(MODES.keys()).index(st.session_state.mode)
+        "Mission type", list(MODES.keys()), format_func=lambda k: MODES[k][0],
+        index=list(MODES.keys()).index(st.session_state.mode), label_visibility="collapsed",
     )
-
-    st.markdown("### 📈 Age & Skill Level")
+    st.caption(MODES[selected_mode][1])
+    st.markdown("### 📈 Difficulty")
     selected_level = st.selectbox(
-        "Level",
-        [1, 2, 3, 4],
-        index=st.session_state.level - 1,
-        format_func=lambda l: LEVEL_NAMES[l]
+        "Difficulty", [1, 2, 3, 4], index=st.session_state.level - 1,
+        format_func=lambda l: LEVEL_NAMES[l], label_visibility="collapsed",
     )
 
-    if (selected_subject != st.session_state.subject or
-        selected_mode != st.session_state.mode or
-        selected_level != st.session_state.level):
+    if (selected_subject != st.session_state.subject or selected_mode != st.session_state.mode
+            or selected_level != st.session_state.level):
         st.session_state.subject = selected_subject
         st.session_state.mode = selected_mode
         st.session_state.level = selected_level
-        st.session_state.current_q = generate_question(selected_subject, selected_level, selected_mode)
-        st.session_state.answered = False
-        st.session_state.last_result = None
-        st.session_state.speech_payload = (st.session_state.current_q["voice"], "pop", str(random.random()))
+        st.session_state.mission_results = []
+        start_question()
         st.rerun()
 
+    st.toggle("🔊 Sound & voice", key="sound_on")
     st.divider()
-    if st.button("🚪 Switch Kid / Log Out"):
-        st.session_state.user_id = None
-        st.session_state.current_q = None
+    if st.button("🚪 Switch crew member"):
+        for k, v in DEFAULTS.items():
+            st.session_state[k] = v
         st.rerun()
 
 if st.session_state.speech_payload:
     txt, sfx, tid = st.session_state.speech_payload
-    speak_child_voice(txt, sfx, tid)
+    speak(txt, sfx, tid)
     st.session_state.speech_payload = None
 
-# ==========================================
-# 9. VIEW 1: SYMMETRICAL GAME ARENA
-# ==========================================
-if nav_choice == "🎮 Play Learning Games":
-    if st.session_state.current_q is None:
-        st.session_state.current_q = generate_question(st.session_state.subject, st.session_state.level, st.session_state.mode)
 
-    q_data = st.session_state.current_q
+# ==========================================
+# 10. VIEW 1 · MISSION DECK
+# ==========================================
+def route_html(results, total, complete):
+    nodes = []
+    for i in range(total):
+        if i < len(results):
+            cls, sym = ("ok", "★") if results[i] else ("bad", "✖")
+        elif i == len(results) and not complete and not st.session_state.answered:
+            cls, sym = "now", "🚀"
+        else:
+            cls, sym = "todo", "○"
+        nodes.append(f'<div class="node {cls}">{sym}</div>')
+    return '<div class="route">' + '<div class="link"></div>'.join(nodes) + "</div>"
 
-    # Symmetrical 4-Column Top HUD Bar
+
+def handle_answer(idx: int, opt: str):
+    s = st.session_state
+    q = s.current_q
+    right = (opt == q["answer"])
+    elapsed = time.time() - s.q_start
+    clean = not s.hint_used
+    fast = (s.mode == "⚡ Lightning Pop") and elapsed <= WARP_WINDOW_SEC
+
+    rank_before = rank_info(user["stars"])["idx"]
+    res = record_attempt(user["id"], s.subject, s.mode, s.level, right, fast=fast, clean=clean)
+    rank_after = rank_info(user["stars"] + res["gained"])
+
+    s.answered, s.last_result, s.chosen, s.result_info = True, right, idx, res
+    s.mission_results = s.mission_results + [right]
+    ranked_up = right and rank_after["idx"] > rank_before
+    s.rank_up = f"{rank_after['icon']} {rank_after['name']}" if ranked_up else None
+
+    if right:
+        cheer = random.choice([
+            f"Woohoo! You did it, {user['child_name']}!",
+            f"Yippee! {opt} is right! You're a superstar!",
+            f"Yay! High five, {user['child_name']}! Super smart!",
+        ])
+        line = f"{cheer} Fun fact! {q['fact']}"
+        sfx = "level" if ranked_up else "win"
+    else:
+        line = f"Nice try, {user['child_name']}! The answer is {q['answer']}. Here is a cool fact! {q['fact']}"
+        sfx = "oops"
+    if len(s.mission_results) >= MISSION_LENGTH:
+        got = sum(s.mission_results)
+        line += f" Mission complete! You got {got} out of {MISSION_LENGTH}!"
+    s.speech_payload = (line, sfx, str(random.random()))
+    st.rerun()
+
+
+if nav_choice == "🎮 Mission Deck":
+    s = st.session_state
+    if s.current_q is None:
+        start_question()
+    q_data = s.current_q
+    mission_done = len(s.mission_results) >= MISSION_LENGTH
+
+    # --- HUD ---
     h1, h2, h3, h4 = st.columns(4, gap="medium")
     with h1:
-        st.markdown(f"""
-        <div class="hud-card">
-            <div class="hud-label">🌍 Learning World</div>
-            <div class="hud-value">{st.session_state.subject}</div>
-        </div>
-        """, unsafe_allow_html=True)
+        ui(f'<div class="hud"><div class="hud-label">Sector</div><div class="hud-value">{SECTOR_NAMES[s.subject]}</div></div>')
     with h2:
-        st.markdown(f"""
-        <div class="hud-card">
-            <div class="hud-label">🎯 Game Mode</div>
-            <div class="hud-value">{st.session_state.mode}</div>
-        </div>
-        """, unsafe_allow_html=True)
+        ui(f'<div class="hud"><div class="hud-label">Mission type</div><div class="hud-value">{MODES[s.mode][0]}</div></div>')
     with h3:
-        st.markdown(f"""
-        <div class="hud-card">
-            <div class="hud-label">⭐ Score & Streak</div>
-            <div class="hud-value">⭐ {user['stars']}  •  🔥 {user['streak']}</div>
-        </div>
-        """, unsafe_allow_html=True)
+        ui(f'<div class="hud"><div class="hud-label">Rank</div><div class="hud-value">{rk["icon"]} {rk["name"]} · ⭐ {user["stars"]}</div>'
+           f'<div class="bar"><div style="width:{rk["pct"]}%"></div></div></div>')
     with h4:
-        if st.button("🔊 Hear Question"):
-            speak_child_voice(q_data["voice"], "pop", str(random.random()))
+        combo = "×2 combo ready" if user["streak"] >= 4 else f"{user['streak']} in a row"
+        ui(f'<div class="hud"><div class="hud-label">Streak</div><div class="hud-value">🔥 {combo}</div>'
+           f'<div class="tiny">Every 5th in a row earns a bonus ⭐</div></div>')
 
-    # Centered Question Stage Card
-    st.markdown(f"""
-    <div class="stage-card">
-        <div class="mascot-pill">
-            <span class="mascot-avatar">{user['avatar']}</span>
-            <span style="font-size:1.15rem; font-weight:700; color:#78350F;">
-                "{user['child_name']}, pick the right answer card below!"
-            </span>
-        </div>
-        <div class="visual-stage">{q_data['visual']}</div>
-        <div class="question-title">{q_data['question']}</div>
+    # --- Mission route ---
+    ui(route_html(s.mission_results, MISSION_LENGTH, mission_done))
+    done_n = min(len(s.mission_results), MISSION_LENGTH)
+    ui(f'<div class="route-cap">Mission progress: {done_n} of {MISSION_LENGTH} waypoints reached</div>')
+
+    # --- Question stage ---
+    ui(f"""
+    <div class="panel stage">
+      <div class="nova"><span class="nova-av">{user['avatar']}</span>
+        <span class="nova-say">{safe_name}, decode the signal!</span></div>
+      <div class="holo">{escape(q_data['visual'])}</div>
+      <div class="q">{escape(q_data['question'])}</div>
     </div>
-    """, unsafe_allow_html=True)
+    """)
 
     if q_data.get("toys"):
-        render_interactive_toys(q_data["toys"])
+        render_scanner(q_data["toys"], s.q_id)
+    if s.mode == "⚡ Lightning Pop" and not s.answered:
+        render_warp_timer(s.q_id)
 
-    # Strict 2x2 Symmetrical Answer Grid (Equal Width & Height)
+    # --- Tools ---
+    t1, t2 = st.columns(2, gap="large")
+    with t1:
+        if st.button("🔊 Replay transmission"):
+            speak(q_data["voice"], "pop", str(random.random()))
+    with t2:
+        if st.button("📡 Scan for clues (removes 2 wrong answers)", disabled=s.answered or s.hint_used):
+            wrong = [i for i, o in enumerate(q_data["options"]) if o != q_data["answer"]]
+            s.eliminated = random.sample(wrong, 2)
+            s.hint_used = True
+            s.speech_payload = ("Scanning! I scrambled two wrong answers for you.", "scan", str(random.random()))
+            st.rerun()
+
+    # --- Answer grid (strict 2x2) ---
     options = q_data["options"]
     row1 = st.columns(2, gap="large")
     row2 = st.columns(2, gap="large")
-    grid_slots = [row1[0], row1[1], row2[0], row2[1]]
-
+    slots = [row1[0], row1[1], row2[0], row2[1]]
     for idx, opt in enumerate(options[:4]):
-        with grid_slots[idx]:
-            if st.button(opt, key=f"opt_{idx}", disabled=st.session_state.answered):
-                is_right = (opt == q_data["answer"])
-                st.session_state.answered = True
-                st.session_state.last_result = is_right
-                unlocked = record_attempt(
-                    user["id"],
-                    st.session_state.subject,
-                    st.session_state.mode,
-                    st.session_state.level,
-                    is_right
-                )
-                st.session_state.new_sticker = unlocked
-                if is_right:
-                    cheer = random.choice([
-                        f"Woohoo! You did it, {user['child_name']}!",
-                        f"Yippee! {opt} is right! You're a superstar!",
-                        f"Yay! High five, {user['child_name']}! Super smart!"
-                    ])
-                    st.session_state.speech_payload = (f"{cheer} Fun fact! {q_data['fact']}", "win", str(random.random()))
-                else:
-                    st.session_state.speech_payload = (
-                        f"Nice try, {user['child_name']}! The answer is {q_data['answer']}. Here is a cool fact! {q_data['fact']}",
-                        "oops",
-                        str(random.random())
-                    )
-                st.rerun()
+        label = opt
+        scrambled = idx in s.eliminated and not s.answered
+        if scrambled:
+            label = "🚫 Signal scrambled"
+        elif s.answered and opt == q_data["answer"]:
+            label = f"✅ {opt}"
+        elif s.answered and idx == s.chosen:
+            label = f"❌ {opt}"
+        with slots[idx]:
+            if st.button(label, key=f"opt_{idx}", disabled=s.answered or scrambled):
+                handle_answer(idx, opt)
 
-    if st.session_state.answered:
-        st.write("")
-        if st.session_state.last_result:
-            st.balloons()
-            st.success(f"🎉 WOOHOO, {user['child_name'].upper()}! You won a shiny ⭐ Star!")
-            if st.session_state.new_sticker:
-                st.info(f"🎁 NEW STICKER UNLOCKED: {st.session_state.new_sticker} Check your Sticker Book!")
+    # --- Result, debrief, next ---
+    if s.answered:
+        info = s.result_info or {"gained": 0, "notes": [], "sticker": None}
+        if s.last_result:
+            notes = " · ".join(info["notes"])
+            extra = f"<small>{notes}</small>" if notes else ""
+            ui(f'<div class="result ok">✅ Signal decoded, {safe_name}! +{info["gained"]} ⭐{extra}</div>')
+            if info["sticker"]:
+                ui(f'<div class="result ok">🎁 Artifact unlocked: {info["sticker"]}<small>See it in the Artifact Vault.</small></div>')
         else:
-            st.warning(f"💛 Good try! The right answer was **{q_data['answer']}** — let's keep learning!")
+            ui(f'<div class="result bad">💛 Not quite. The answer was <b>{escape(q_data["answer"])}</b>. '
+               f'<small>Your streak resets, but every try teaches your brain something new.</small></div>')
 
-        st.markdown(f"""
-        <div class="fact-box">
-            <strong>💡 Did You Know? (Fun Kid Fact):</strong><br>{q_data['fact']}
-        </div>
-        """, unsafe_allow_html=True)
+        if s.rank_up:
+            st.balloons()
+            ui(f'<div class="rankup">🎖️ RANK UP! {safe_name} is now {s.rank_up}</div>')
+
+        ui(f'<div class="fact"><b>💡 NOVA\'s fun fact:</b><br>{escape(q_data["fact"])}</div>')
+
+        if mission_done:
+            got = sum(s.mission_results)
+            rating = 3 if got >= 4 else (2 if got == 3 else 1)
+            ui(f"""
+            <div class="panel debrief">
+              <div class="big">Mission complete</div>
+              <div style="font-size:2.2rem;margin:6px 0">{'⭐' * rating}{'☆' * (3 - rating)}</div>
+              <div style="font-size:1.2rem">{got} of {MISSION_LENGTH} waypoints cleared.
+              {'Flawless flying!' if got == MISSION_LENGTH else 'Great flying, ready for the next one?'}</div>
+            </div>
+            """)
+            if got >= 4 and not s.rank_up:
+                st.balloons()
 
         st.write("")
-        _, center_btn, _ = st.columns([1, 2, 1])
-        with center_btn:
-            if st.button("➡️ Next Fun Challenge!"):
-                st.session_state.current_q = generate_question(st.session_state.subject, st.session_state.level, st.session_state.mode)
-                st.session_state.answered = False
-                st.session_state.last_result = None
-                st.session_state.new_sticker = None
-                st.session_state.speech_payload = (st.session_state.current_q["voice"], "pop", str(random.random()))
+        _, mid, _ = st.columns([1, 2, 1])
+        with mid:
+            if st.button("🚀 Launch next mission" if mission_done else "➡️ Next signal"):
+                if mission_done:
+                    s.mission_results = []
+                start_question()
                 st.rerun()
 
 # ==========================================
-# 10. VIEW 2: SYMMETRICAL 5x4 STICKER BOOK
+# 11. VIEW 2 · ARTIFACT VAULT
 # ==========================================
-elif nav_choice == "🏆 My Sticker Book":
-    st.markdown(f"## 🏆 {user['child_name']}'s Magical Sticker Album")
-    st.write("Collect **1 new cartoon sticker** for every **3 stars** you win!")
-
-    all_stickers = ["🌟"] + STICKER_POOL  # 20 stickers = exact 5 columns x 4 rows
+elif nav_choice == "🏆 Artifact Vault":
+    st.markdown(f"## 🏆 {safe_name}'s Artifact Vault")
+    all_stickers = ["🌟"] + STICKER_POOL           # 20 slots = 5 columns x 4 rows
+    got_n = len([s_ for s_ in all_stickers if s_ in user["stickers"]])
+    to_next = 3 - (user["stars"] % 3)
+    ui(f"""
+    <div class="panel" style="margin-bottom:16px">
+      <b>{got_n} of {len(all_stickers)} artifacts recovered.</b>
+      {'Earn ' + str(to_next) + ' more ⭐ to unlock the next one.' if got_n < len(all_stickers) else 'Vault complete. Legendary!'}
+      <div class="bar"><div style="width:{int(got_n / len(all_stickers) * 100)}%"></div></div>
+    </div>
+    """)
     grid = st.columns(5, gap="medium")
     for idx, sticker in enumerate(all_stickers):
         unlocked = sticker in user["stickers"]
         with grid[idx % 5]:
-            st.markdown(f"""
-            <div style="background:{'#FFFFFF' if unlocked else '#E2E8F0'};
-                        border:3px solid {'#D97706' if unlocked else '#94A3B8'};
-                        border-radius:22px; padding:18px 10px; text-align:center; margin-bottom:14px;
-                        box-shadow:0 5px 0 {'#B45309' if unlocked else '#64748B'};">
-                <div style="font-size:3.2rem; opacity:{'1' if unlocked else '0.30'};">{sticker}</div>
-                <div style="font-size:0.95rem; font-weight:700; color:{'#0F172A' if unlocked else '#475569'}; margin-top:4px;">
-                    {'Unlocked!' if unlocked else 'Locked'}
-                </div>
+            ui(f"""
+            <div class="artifact {'on' if unlocked else 'off'}">
+              <div class="em">{sticker}</div>
+              <div class="st">{'Recovered' if unlocked else 'Sealed'}</div>
             </div>
-            """, unsafe_allow_html=True)
+            """)
 
 # ==========================================
-# 11. VIEW 3: SYMMETRICAL PARENT PROGRESS REPORT
+# 12. VIEW 3 · COMMAND ANALYTICS (parents & teachers)
 # ==========================================
 else:
-    st.markdown(f"## 📊 Parent & Teacher Development Report: {user['child_name']}")
+    import pandas as pd
+
+    st.markdown(f"## 📊 Command Analytics: {safe_name}")
     rows = get_progress_stats(user["id"])
 
     if not rows:
-        st.info("No exercises completed yet! Head over to **Play Learning Games** to start tracking progress.")
+        st.info("No missions flown yet. Open the Mission Deck to start collecting data.")
     else:
-        import pandas as pd
         df = pd.DataFrame(rows, columns=["Subject", "Mode", "Level", "Correct", "Timestamp"])
+        df["Timestamp"] = pd.to_datetime(df["Timestamp"])
+        df = df.sort_values("Timestamp").reset_index(drop=True)
+        df["Sector"] = df["Subject"].map(SECTOR_NAMES).fillna(df["Subject"])
+        df["Mission type"] = df["Mode"].map(lambda m: MODES.get(m, (m,))[0])
 
-        m1, m2, m3, m4 = st.columns(4, gap="medium")
-        metrics = [
-            ("⭐ Total Stars", str(user["stars"])),
-            ("📝 Exercises Played", str(len(df))),
-            ("🎯 Overall Accuracy", f"{df['Correct'].mean() * 100:.0f}%"),
-            ("🏆 Stickers Earned", f"{len(user['stickers'])} / {len(STICKER_POOL) + 1}")
+        kpis = [
+            ("⭐ Total stars", str(user["stars"])),
+            ("📝 Questions answered", str(len(df))),
+            ("🎯 Overall accuracy", f"{df['Correct'].mean() * 100:.0f}%"),
+            ("🏆 Artifacts", f"{len(user['stickers'])} / {len(STICKER_POOL) + 1}"),
         ]
-        for col, (lbl, val) in zip([m1, m2, m3, m4], metrics):
+        for col, (lbl, val) in zip(st.columns(4, gap="medium"), kpis):
             with col:
-                st.markdown(f"""
-                <div class="hud-card">
-                    <div class="hud-label">{lbl}</div>
-                    <div class="hud-value" style="font-size:1.6rem;">{val}</div>
-                </div>
-                """, unsafe_allow_html=True)
+                ui(f'<div class="hud"><div class="hud-label">{lbl}</div><div class="hud-value" style="font-size:1.5rem">{val}</div></div>')
 
+        # --- Insight ---
+        by_sector = df.groupby("Sector").agg(Questions=("Correct", "count"), Accuracy=("Correct", "mean")).reset_index()
+        solid = by_sector[by_sector["Questions"] >= 3]
+        if len(solid) >= 2:
+            best, weak = solid.loc[solid["Accuracy"].idxmax()], solid.loc[solid["Accuracy"].idxmin()]
+            msg = (f"<b>Strongest sector:</b> {best['Sector']} ({best['Accuracy'] * 100:.0f}%). "
+                   f"<b>Needs more practice:</b> {weak['Sector']} ({weak['Accuracy'] * 100:.0f}%).")
+        elif len(solid) == 1:
+            msg = f"<b>{solid.iloc[0]['Sector']}</b> has enough data so far. Try another sector for a fuller picture."
+        else:
+            msg = "Answer at least 3 questions in a sector to unlock strength and focus insights."
         st.write("")
+        ui(f'<div class="panel">💡 {msg}</div>')
+        st.write("")
+
         c_left, c_right = st.columns(2, gap="large")
         with c_left:
-            st.markdown("### 📚 Mastery by Learning World")
-            subj_summary = df.groupby("Subject").agg(
-                Questions=("Correct", "count"),
-                Correct_Answers=("Correct", "sum")
-            ).reset_index()
-            subj_summary["Accuracy (%)"] = (subj_summary["Correct_Answers"] / subj_summary["Questions"] * 100).round(1)
-            st.dataframe(subj_summary, use_container_width=True, hide_index=True)
-
+            st.markdown("### 📚 Accuracy by sector")
+            chart = by_sector.assign(**{"Accuracy (%)": (by_sector["Accuracy"] * 100).round(1)}).set_index("Sector")[["Accuracy (%)"]]
+            st.bar_chart(chart)
         with c_right:
-            st.markdown("### 📈 Progress by Age / Skill Level")
-            lvl_summary = df.groupby("Level").agg(
-                Attempts=("Correct", "count"),
-                Accuracy_Pct=("Correct", lambda s: round(s.mean() * 100, 1))
-            ).reset_index()
-            lvl_summary["Level Name"] = lvl_summary["Level"].map(LEVEL_NAMES)
-            st.bar_chart(lvl_summary.set_index("Level Name")["Accuracy_Pct"])
+            st.markdown("### 📈 Accuracy trend (rolling 5)")
+            trend = (df["Correct"].rolling(5, min_periods=1).mean() * 100).round(1)
+            st.line_chart(pd.DataFrame({"Accuracy (%)": trend}))
+
+        c1, c2 = st.columns(2, gap="large")
+        with c1:
+            st.markdown("### 🚀 Accuracy by difficulty")
+            lvl = df.groupby("Level")["Correct"].mean().mul(100).round(1)
+            lvl.index = [LEVEL_NAMES.get(i, str(i)) for i in lvl.index]
+            st.bar_chart(lvl.rename("Accuracy (%)"))
+        with c2:
+            st.markdown("### 🕒 Recent flight log")
+            recent = df.tail(10).iloc[::-1].copy()
+            recent["When"] = recent["Timestamp"].dt.strftime("%d %b, %H:%M")
+            recent["Result"] = recent["Correct"].map({1: "✅ Correct", 0: "❌ Retry"})
+            try:
+                st.dataframe(recent[["When", "Sector", "Mission type", "Result"]], width="stretch", hide_index=True)
+            except TypeError:   # older Streamlit versions
+                st.dataframe(recent[["When", "Sector", "Mission type", "Result"]], use_container_width=True, hide_index=True)
+
+        export = df[["Timestamp", "Sector", "Mission type", "Level", "Correct"]].to_csv(index=False)
+        st.download_button("⬇️ Export report (CSV)", export, file_name=f"wonderkids_{user['username']}_report.csv", mime="text/csv")
